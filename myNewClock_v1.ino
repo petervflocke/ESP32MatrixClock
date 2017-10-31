@@ -8,17 +8,17 @@
 
 #include "myClock.h"  
 #include <TimeLib.h>
+#include <SPI.h>
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include "Parola_fonts.h"
-#include <SPI.h>
 #include <WiFi.h>
 #include <WiFiManager.h>   
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 0, 60000);
+NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 0, 600000);
 MD_Parola   P  = MD_Parola(CS_PIN, MAX_DEVICES);
 boolean DstFlag = false; // indicate if DS is on/off based on the time for Germany / CET,CEST
 
@@ -80,6 +80,47 @@ sCatalog  catalog[] =
 };
 
 
+int effectnr = 11;
+bool newMessageAvailable = false;
+String inString = "";
+
+void readSerial(void)
+{
+  // Read serial input:
+  while (Serial.available() > 0) {
+    int inChar = Serial.read();
+    if (isDigit(inChar)) {
+      // convert the incoming byte to a char and add it to the string:
+      inString += (char)inChar;
+    }
+    // if you get a newline, print the string, then the string's value:
+    if (inChar == '\n') {
+      effectnr = inString.toInt();
+      newMessageAvailable = true;
+      inString = "";
+
+      if (effectnr == 0) {
+        setTime(1509242390);
+      }
+      if (effectnr == 1) {
+
+        if (WiFi.isConnected()) {
+          SyncNTP();
+        } else {
+          Serial.print("Recovering connection\nStatus: ");
+          WiFi.mode(WIFI_STA);
+          WiFi.begin();
+          delay(2000);
+          SyncNTP();
+          WiFi.mode(WIFI_OFF);
+        }
+      }
+    }
+  }
+}
+
+
+
 
 // Time management 
 time_t requestSync() {return 0;} // the time will be sent later in response to serial mesg
@@ -102,7 +143,22 @@ boolean IsDst(uint8_t _month, uint8_t _day, uint8_t _weekday) {
   return false; // this line never gonna happend
 }
 
-boolean syncNTP() {
+boolean SyncNTP() {
+
+  Serial.println("Starting NTP Sync\n");
+  if (timeClient.forceUpdate()){
+    setTime(timeClient.getEpochTime());
+    Serial.print("NTP sync OK, UTC=");
+    Serial.println(timeClient.getFormattedTime() );
+    return true;
+  } else {
+    Serial.println("NTP sync failed!");
+    return false;    
+  }
+}
+
+
+boolean FirstSyncNTP() {
 
   P.displayZoneText(0, "NTP Sync", PA_LEFT, 20, 250, PA_SCROLL_LEFT, PA_NO_EFFECT);  
   while (!P.displayAnimate()) ;
@@ -138,6 +194,15 @@ boolean syncNTP() {
   return true;
 }
 
+
+bool shouldSaveConfig = false;
+//callback notifying us of the need to save config
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
+
+
 void SetupWiFi(void) {
     WiFiManager wifiManager; 
   
@@ -148,6 +213,7 @@ void SetupWiFi(void) {
     Serial.println("[Staring WiFi Manager]\n");
     //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
     //wifiManager.setAPCallback(configModeCallback);
+    wifiManager.setSaveConfigCallback(saveConfigCallback);
     wifiManager.setMinimumSignalQuality();
     // wifiManager.setAPStaticIPConfig(IPAddress(192,168,2,1), IPAddress(192,168,2,1), IPAddress(255,255,255,0));
     if (!wifiManager.autoConnect("ClockWiFi", "password")) {
@@ -168,7 +234,7 @@ void SetupWiFi(void) {
 
 boolean update_time(int &value, int &lvalue, int newvalue, char * buf1, char* buf0, int zone1, int zone0) {
   
-  int effectnr = 11;
+  
   
   if (value != newvalue)
   {
@@ -194,15 +260,17 @@ void setup()
     
     pinMode(ledPin, OUTPUT);
 
-
-    P.begin();
-    //P.begin(MAX_ZONES);
+    P.begin(MAX_ZONES);
     P.setZone(0, 0, 7);
     P.setIntensity(0, 0);
     P.setFont(0, f5x8);
     
-    //SetupWiFi();
-    //syncNTP();
+    SetupWiFi();
+    FirstSyncNTP();
+
+    WiFi.mode(WIFI_OFF);
+
+    
 
     ClockState = _Clock_init;
      
@@ -285,7 +353,7 @@ void loop()
           if ( update_time(valueS, lvalueS, second(), sS1, sS0, S1, S0) ) {
             flasher = !flasher;
             digitalWrite(ledPin, flasher);
-            Serial.println(timeClient.getFormattedTime() );
+            //Serial.println(timeClient.getFormattedTime() );
           }
           break;
       case _Clock_idle:
@@ -318,17 +386,17 @@ void loop()
 
   
   P.displayAnimate();
-//  P._D.setPoint(2,PW_secp, flasher);
-//  P._D.setPoint(5,PW_secp, flasher);
-//  P._D.setPoint(0,3*8-1, true);
-//  P._D.setPoint(1,3*8-1, true);
+  P._D.setPoint(2,PW_secp, flasher);
+  P._D.setPoint(5,PW_secp, flasher);
+  P._D.setPoint(0,3*8-1, true);
+  P._D.setPoint(1,3*8-1, true);
 
-//  readSerial();
-//  if (newMessageAvailable)
-//  {
-//    newMessageAvailable = false;
-//    // for (int i = 0; i <= MAX_ZONES-1; P.setTextEffect(i++, catalog[effectnr].effect, PA_NO_EFFECT));
-//  }
+  readSerial();
+  if (newMessageAvailable)
+  {
+    newMessageAvailable = false;
+    for (int i = 0; i < MAX_ZONES; P.setTextEffect(i++, catalog[effectnr].effect, PA_NO_EFFECT));
+  }
     
 
 }

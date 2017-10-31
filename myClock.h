@@ -15,7 +15,7 @@
 #define ledPin 2
 
 //MD_Parola params:
-#define MAX_ZONES 7
+#define MAX_ZONES 6
 #define MAX_DEVICES 8
 #define CLK_PIN   13
 #define DATA_PIN  11
@@ -40,6 +40,8 @@
 // #define DST_ON true
 #define CEST 2
 #define CET  1
+// Define time to resync
+#define NTPRESYNC 60000
 
 enum ClockStates
 {
