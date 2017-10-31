@@ -103,11 +103,10 @@ void readSerial(void)
         setTime(1509242390);
       }
       if (effectnr == 1) {
-
-        if (WiFi.isConnected()) {
+        if (WiFi.isConnected()) {  //rather not :)
           SyncNTP();
         } else {
-          Serial.print("Recovering connection\nStatus: ");
+          Serial.println("Recovering WiFi connection:");
           WiFi.mode(WIFI_STA);
           WiFi.begin();
           delay(2000);
