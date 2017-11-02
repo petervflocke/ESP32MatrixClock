@@ -41,15 +41,26 @@
 #define CEST 2
 #define CET  1
 // Define time to resync
-#define NTPRESYNC 60000
+// 12h
+#define NTPRESYNC 43200
+// 1h
+#define NTPRESYNC_Err 3600
 
 enum ClockStates
 {
    _Clock_init,
    _Clock_wifi_setup,
-   _Clock_ntp_connect,
-   _Clock_ntp_update,
+   _Clock_NTP_Sync,
    _Clock_simple_time_init,
    _Clock_simple_time,
+   _Clock_complete_info_init,
+   _Clock_complete_info,
    _Clock_idle
 };
+
+enum DataStates
+{
+   _Data_Day,
+   _Data_Month
+};
+

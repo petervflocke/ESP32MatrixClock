@@ -1,8 +1,8 @@
 /*
- *  This sketch sends data via HTTP GET requests to data.sparkfun.com service.
+ *  Under development, not produtive :)
  *
- *  You need to get streamId and privateKey at data.sparkfun.com and paste them
- *  below. Or just customize this script to talk to other HTTP servers.
+ *  NEW: workaround for parola issue and system restart for max zones > 7
+ *  
  *
  */
 
@@ -16,14 +16,21 @@
 #include <WiFiManager.h>   
 #include <WiFiUdp.h>
 #include <NTPClient.h>
+#include <myScheduler.h>
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 0, 600000);
-MD_Parola   P  = MD_Parola(CS_PIN, MAX_DEVICES);
+NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 0);
+
+unsigned long NTPSyncPeriod = NTPRESYNC;
+
+MD_Parola   P0  = MD_Parola(CS_PIN, MAX_DEVICES);
+MD_Parola   P1  = MD_Parola(CS_PIN, MAX_DEVICES);
+
 boolean DstFlag = false; // indicate if DS is on/off based on the time for Germany / CET,CEST
 
 
-ClockStates ClockState = _Clock_init;
+ClockStates ClockState  = _Clock_init;
+ClockStates lClockState = _Clock_init;
 
 // Buffers for clock digits
 static char sH1[] = "0";
@@ -100,26 +107,31 @@ void readSerial(void)
       inString = "";
 
       if (effectnr == 0) {
-        setTime(1509242390);
+        ClockState = _Clock_simple_time_init;
+        // setTime(1509242390);
+        //P0.setIntensity(0);
+        //P0.displayClear();
+        //P0.displayZoneText(0, "De-Sync Clock", PA_LEFT, 25, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+        //while (!P0.displayAnimate());
+        //P0.displayClear();
+
       }
       if (effectnr == 1) {
-        if (WiFi.isConnected()) {  //rather not :)
-          SyncNTP();
-        } else {
-          Serial.println("Recovering WiFi connection:");
-          WiFi.mode(WIFI_STA);
-          WiFi.begin();
-          delay(2000);
-          SyncNTP();
-          WiFi.mode(WIFI_OFF);
-        }
+        ClockState = _Clock_complete_info_init;
+//        if (WiFi.isConnected()) {  //rather not :)
+//          SyncNTP();
+//        } else {
+//          Serial.println("Recovering WiFi connection:");
+//          WiFi.mode(WIFI_STA);
+//          WiFi.begin();
+//          delay(2000);
+//          SyncNTP();
+//          WiFi.mode(WIFI_OFF);
+//        }
       }
     }
   }
 }
-
-
-
 
 // Time management 
 time_t requestSync() {return 0;} // the time will be sent later in response to serial mesg
@@ -159,8 +171,8 @@ boolean SyncNTP() {
 
 boolean FirstSyncNTP() {
 
-  P.displayZoneText(0, "NTP Sync", PA_LEFT, 20, 250, PA_SCROLL_LEFT, PA_NO_EFFECT);  
-  while (!P.displayAnimate()) ;
+  P0.displayZoneText(0, "NTP Sync", PA_LEFT, 20, 250, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+  while (!P0.displayAnimate()) ;
   
   Serial.println("Starting 1st time NTP\n");
   timeClient.begin();
@@ -168,13 +180,13 @@ boolean FirstSyncNTP() {
   delay(100);
   while (!timeClient.forceUpdate()){
     Serial.print(".");
-    P.displayZoneText(0, "-", PA_LEFT, 10, 10, PA_SCROLL_LEFT, PA_NO_EFFECT);  
-    while (!P.displayAnimate()) ;
+    P0.displayZoneText(0, "-", PA_LEFT, 10, 10, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+    while (!P0.displayAnimate()) ;
   }
   Serial.print("NTP sync OK, UTC=");
   Serial.println(timeClient.getFormattedTime() );
-  P.displayZoneText(0, "Sync OK", PA_LEFT, 20, 250, PA_SCROLL_LEFT, PA_NO_EFFECT);  
-  while (!P.displayAnimate()) ;
+  P0.displayZoneText(0, "Sync OK", PA_LEFT, 20, 250, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+  while (!P0.displayAnimate()) ;
   
 
   setSyncProvider(requestSync);  //set function to call when sync required  
@@ -207,8 +219,8 @@ void SetupWiFi(void) {
   
     //reset settings - for testing
     //wifiManager.resetSettings();
-    P.displayZoneText(0, "WiFi Setup", PA_LEFT, SPEED_TIME, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
-    while (!P.displayAnimate()) ;
+    P0.displayZoneText(0, "WiFi Setup", PA_LEFT, SPEED_TIME, 500, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+    while (!P0.displayAnimate()) ;
     Serial.println("[Staring WiFi Manager]\n");
     //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
     //wifiManager.setAPCallback(configModeCallback);
@@ -223,8 +235,8 @@ void SetupWiFi(void) {
       delay(5000);
     }
     Serial.println("...WIFI connected!\n");
-    P.displayZoneText(0, "Connected", PA_LEFT, SPEED_TIME, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);    
-    while (!P.displayAnimate()) ;  
+    P0.displayZoneText(0, "Connected", PA_LEFT, SPEED_TIME, 500, PA_SCROLL_LEFT, PA_NO_EFFECT);    
+    while (!P0.displayAnimate()) ;  
     Serial.println("");
     Serial.println("WiFi connected");
     Serial.println("IP address: ");
@@ -232,54 +244,72 @@ void SetupWiFi(void) {
 }
 
 boolean update_time(int &value, int &lvalue, int newvalue, char * buf1, char* buf0, int zone1, int zone0) {
-  
-  
-  
   if (value != newvalue)
   {
     value = newvalue;
     if ( lvalue / 10 != value / 10 ) {
       buf1[0] = (char)('0' + (value / 10));
-      P.displayZoneText(zone1, buf1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[effectnr].effect, PA_NO_EFFECT);
+      P1.displayZoneText(zone1, buf1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[effectnr].effect, PA_NO_EFFECT);
     }
     buf0[0] = (char)('0' + (value % 10));
-    P.displayZoneText(zone0, buf0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[effectnr].effect, PA_NO_EFFECT);
+    P1.displayZoneText(zone0, buf0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[effectnr].effect, PA_NO_EFFECT);
     lvalue = value;
     return true;
   }
   else return false;
 }
 
+void Status2Clock_NTP_Sync(void) {
+  lClockState = ClockState;
+  ClockState  = _Clock_NTP_Sync;
+}
+
+Schedular NTPUpdateTask; 
+Schedular DataDisplayTask; 
 
 void setup()
 {
+    pinMode(ledPin, OUTPUT);
     Serial.begin(115200);
     delay(100);
-    Serial.println("[Clock started]\n");
+    Serial.println("Clock started\n");
     
-    pinMode(ledPin, OUTPUT);
+    P0.begin();
+//    P0.setZone(0, 0, 6);
+    P0.setIntensity(0);
+    P0.setFont(f5x8);
 
-    P.begin(MAX_ZONES);
-    P.setZone(0, 0, 7);
-    P.setIntensity(0, 0);
-    P.setFont(0, f5x8);
-    
+    P0.displayZoneText(0, "Hello", PA_LEFT, 25, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+    while (!P0.displayAnimate()) ;
+
+
     SetupWiFi();
     FirstSyncNTP();
 
     WiFi.mode(WIFI_OFF);
 
-    
+    P1.begin(7);
 
-    ClockState = _Clock_init;
+    NTPUpdateTask.start(nextMidnight( now()*1000 + 5000)); 
+    
+    Serial.print("Time to sync: ");
+    Serial.println(numberOfMinutes ( nextMidnight( now() ) ) );
+
+    ClockState = _Clock_complete_info_init;
      
 }
 
 void loop()
 {
-    static bool flasher = false;  // seconds passing flasher
-    
-    
+    static bool flasher = false;     // seconds passing flasher
+    static uint8_t intensity = 0;    // brithness of the led matrix - all modules
+
+    static char DataStr[] = "xx:xx:xx Xxx xx Xxx xxxx                ";
+                          // 0123456789012345678901234567891234567890
+                          // 0         2         3         4        5
+  
+                          // 23:59:59 Sun 31 Oct 2016 100°C 1000HPa
+    static uint8_t DataMode = 0;
     
   boolean nix;
 
@@ -287,36 +317,42 @@ void loop()
   {
       case _Clock_init:
 
-//          PRINTS("INIT CLosed\n");
-
-          ClockState = _Clock_wifi_setup;
-          break;
-          
-      case _Clock_wifi_setup:
-         
-          ClockState = _Clock_ntp_connect;
-          break;
-          
-      case _Clock_ntp_connect:
-
           ClockState = _Clock_simple_time_init;
           break;
           
-      case _Clock_ntp_update:
-          
+      case _Clock_NTP_Sync:
+
+        P0.displayClear();
+        P0.setIntensity(intensity);
+        P0.displayZoneText(0, "NTP Re-SYNC", PA_LEFT, 25, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+        while (!P0.displayAnimate());
+        P0.displayClear();
+
+        if (WiFi.isConnected()) {  //rather not :)
+          SyncNTP();
+        } else {
+          Serial.println("Recovering WiFi connection:");
+          WiFi.mode(WIFI_STA);
+          P0.displayZoneText(0, "Connecting WiFi", PA_LEFT, 25, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+          WiFi.begin();
+          while (!P0.displayAnimate());
+          P0.displayZoneText(0, "Connecting NTP", PA_LEFT, 25, 1000, PA_SCROLL_LEFT, PA_NO_EFFECT);  
+          SyncNTP();
+          while (!P0.displayAnimate());
+          WiFi.mode(WIFI_OFF);
+          ClockState = lClockState;
+        }
           break;
-          
+                    
       case _Clock_simple_time_init:
-
-          P.displayClear();
-
-          P.setZone(H1, 6, 6); P.setIntensity(H1, 0); P.setFont(H1, f5x8);
-          P.setZone(H0, 5, 5); P.setIntensity(H0, 0); P.setFont(H0, f5x8);
-          P.setZone(M1, 4, 4); P.setIntensity(M1, 0); P.setFont(M1, f5x8);
-          P.setZone(M0, 3, 3); P.setIntensity(M0, 0); P.setFont(M0, f5x8);
-          P.setZone(S1, 2, 2); P.setIntensity(S1, 0); P.setFont(S1, f5x8);
-          P.setZone(S0, 1, 1); P.setIntensity(S0, 0); P.setFont(S0, f5x8);
-          P.setZone(RR, 0, 0); P.setIntensity(RR, 0); P.setFont(RR, f5x8);
+          P1.displayClear();
+          P1.setZone(H1, 6, 6); P1.setIntensity(H1, intensity); P1.setFont(H1, f5x8);
+          P1.setZone(H0, 5, 5); P1.setIntensity(H0, intensity); P1.setFont(H0, f5x8);
+          P1.setZone(M1, 4, 4); P1.setIntensity(M1, intensity); P1.setFont(M1, f5x8);
+          P1.setZone(M0, 3, 3); P1.setIntensity(M0, intensity); P1.setFont(M0, f5x8);
+          P1.setZone(S1, 2, 2); P1.setIntensity(S1, intensity); P1.setFont(S1, f5x8);
+          P1.setZone(S0, 1, 1); P1.setIntensity(S0, intensity); P1.setFont(S0, f5x8);
+          P1.setZone(RR, 0, 0); P1.setIntensity(RR, intensity); P1.setFont(RR, f5x8);
         
           valueH = hour();
           valueM = minute();
@@ -332,14 +368,12 @@ void loop()
           sS1[0] = (char)('0' + (valueS / 10));
           sS0[0] = (char)('0' + (valueS % 10));
         
-          P.displayZoneText(H1, sH1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-          P.displayZoneText(H0, sH0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-          P.displayZoneText(M1, sM1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-          P.displayZoneText(M0, sM0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-          P.displayZoneText(S1, sS1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-          P.displayZoneText(S0, sS0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
-
-          delay(1000);
+          P1.displayZoneText(H1, sH1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(H0, sH0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(M1, sM1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(M0, sM0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(S1, sS1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(S0, sS0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
           Serial.println("Simple Time Init closed");
           
           ClockState = _Clock_simple_time;
@@ -354,7 +388,84 @@ void loop()
             digitalWrite(ledPin, flasher);
             //Serial.println(timeClient.getFormattedTime() );
           }
+
+          P1._D.setPoint(2,PW_secp, flasher);
+          P1._D.setPoint(5,PW_secp, flasher);
+          P1._D.setPoint(0,3*8-1, true);
+          P1._D.setPoint(1,3*8-1, true);          
+                    
           break;
+
+      case _Clock_complete_info_init:
+          P1.displayClear();
+          P1.setZone(H1, 7, 7); P1.setIntensity(H1, intensity); P1.setFont(H1, f5x8);
+          P1.setZone(H0, 6, 6); P1.setIntensity(H0, intensity); P1.setFont(H0, f5x8);
+          P1.setZone(M1, 5, 5); P1.setIntensity(M1, intensity); P1.setFont(M1, f5x8);
+          P1.setZone(M0, 4, 4); P1.setIntensity(M0, intensity); P1.setFont(M0, f5x8);
+          P1.setZone( 4, 0, 3); P1.setIntensity( 4, intensity); P1.setFont( 4, f5x8);
+        
+          valueH = hour();
+          valueM = minute();
+          valueS = second();
+          lvalueH = valueH;
+          lvalueM = valueM;
+          lvalueS = valueS;
+        
+          sH1[0] = (char)('0' + valueH / 10);
+          sH0[0] = (char)('0' + (valueH % 10));
+          sM1[0] = (char)('0' + (valueM / 10));
+          sM0[0] = (char)('0' + (valueM % 10));  
+        
+          P1.displayZoneText(H1, sH1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(H0, sH0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(M1, sM1, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+          P1.displayZoneText(M0, sM0, PA_CENTER, SPEED_TIME, PAUSE_TIME, catalog[EFFECT].effect, PA_NO_EFFECT);
+
+
+          DataDisplayTask.start();
+          
+          Serial.println("Complete Time Init closed");
+          
+          ClockState = _Clock_complete_info;
+          break;
+
+      case _Clock_complete_info:
+          update_time(valueH, lvalueH, hour(), sH1, sH0, H1, H0);
+          update_time(valueM, lvalueM, minute(), sM1, sM0, M1, M0);
+          nix = false;
+          if ( update_time(valueS, lvalueS, second(), sS1, sS0, 10, 10) ) {
+            flasher = !flasher;
+            digitalWrite(ledPin, flasher);
+            //Serial.println(timeClient.getFormattedTime() );
+
+            if ( DataDisplayTask.check(2000) ) 
+            {
+              switch (DataMode){
+                case 0:
+                   sprintf (DataStr, "%02d", day());
+                   break;
+                case 1:
+                   sprintf (DataStr, "%s", dayShortStr(weekday()));
+                   break;
+                case 2: 
+                   sprintf (DataStr, "%s", monthShortStr(month()));
+                   break;
+                case 3: 
+                   sprintf (DataStr, "%s %02d, %s", dayShortStr(day()), day(), monthShortStr(month()));
+                   break;                   
+              }
+              //Serial.println(DataStr);
+              //Serial.println(timeClient.getFormattedTime());
+              
+              P1.displayZoneText(4, DataStr, PA_CENTER, 25, 0, catalog[effectnr].effect, PA_NO_EFFECT);  
+              DataMode = (DataMode+1) % 3;
+            }
+
+          P1._D.setPoint(2,PW_secp+8, flasher);
+          P1._D.setPoint(5,PW_secp+8, flasher);
+            
+          }
+          break;          
       case _Clock_idle:
           
           break;
@@ -362,9 +473,7 @@ void loop()
       default:;
   }
 
-  if ( ClockState != _Clock_init &&
-       ClockState != _Clock_wifi_setup &&
-       ClockState != _Clock_ntp_connect) {
+  if ( ClockState != _Clock_init ) {
           //Check if DST has to correct the time
           if (month() == 3) {
             if (day() - weekday() >= 24) {
@@ -383,20 +492,19 @@ void loop()
           }        
        }
 
-  
-  P.displayAnimate();
-  P._D.setPoint(2,PW_secp, flasher);
-  P._D.setPoint(5,PW_secp, flasher);
-  P._D.setPoint(0,3*8-1, true);
-  P._D.setPoint(1,3*8-1, true);
+    
+  P1.displayAnimate();
+
 
   readSerial();
   if (newMessageAvailable)
   {
     newMessageAvailable = false;
-    for (int i = 0; i < MAX_ZONES; P.setTextEffect(i++, catalog[effectnr].effect, PA_NO_EFFECT));
+    for (int i = 0; i < MAX_ZONES; P1.setTextEffect(i++, catalog[effectnr].effect, PA_NO_EFFECT));
   }
-    
+  
+  NTPUpdateTask.check(Status2Clock_NTP_Sync, NTPSyncPeriod);
 
 }
+
 
