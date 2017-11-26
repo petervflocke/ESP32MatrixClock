@@ -14,19 +14,34 @@
 // For system Pulse Indicator
 #define ledPin 2
 
-//MD_Parola params:
-#define MAX_ZONES 6
-#define MAX_DEVICES 8
-#define CLK_PIN   13
-#define DATA_PIN  11
-#define CS_PIN    10
-#define PW_hour   52
-#define PW_min    38
-#define PW_secp   39
-#define SPEED_TIME  25
-#define PAUSE_TIME  1
+//PPMax72xxPanel definitions
+#define pinCS = 10; // Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
+#define numberOfHorizontalDisplays = 8;
+#define numberOfVerticalDisplays = 1;
 
-// Zone numbers for the simple time display
+
+// PPmax72xxAnimate: Zone numbers for the simple time display
+#define H1s  0
+#define H1e  6
+#define H0s  6
+#define H0e 12
+#define M1s 15
+#define M1e 20
+#define M0s 20
+#define M0e 25
+#define S1s 28
+#define S1e 32
+#define S0s 32
+#define S0e 37
+#define I0s  0
+#define I0e 64
+#define I1s 27
+#define I1e 64
+#define I2s  0
+#define I2e 64
+
+// Old to be removed: Zone numbers for the simple time display
+
 #define H1 0
 #define H0 1
 #define M1 2
