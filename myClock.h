@@ -1,18 +1,22 @@
 // Turn on debug statements to the serial output
-#define  DEBUG  0
 
-//#if  DEBUG
-//#define PRINT(s, x) { Serial.print(F(s)); Serial.println(x); }
-//#define PRINTS(x) Serial.print(F(x))
-//#define PRINTX(x) Serial.println(x, HEX)
-//#else
-//#define PRINT(s, x)
-//#define PRINTS(x)
-//#define PRINTX(x)
-//#endif
+#define  DEBUG_ON 1
+#if  DEBUG_ON
+#define PRINT(s, v) { Serial.print(F(s)); Serial.print(v); }    ///< (GENERAL) Print a string followed by a value (decimal)
+#define PRINTX(s, v) { Serial.print(F(s)); Serial.print(v, HEX); }  ///< (GENERAL) Print a string followed by a value (hex)
+#define PRINTS(s) Serial.print(F(s))   ///< (GENERAL) Print a string
+#define PRINTLN Serial.println()
+#else
+#define PRINT(s, v)   
+#define PRINTX(s, v)  
+#define PRINTS(s)     
+#define PRINTLN
+#endif
 
 // For system Pulse Indicator
 #define ledPin 2
+// for booting time to enable/disable wifi config
+#define modePin 27
 
 //PPMax72xxPanel definitions
 #define pinCS = 10; // Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
