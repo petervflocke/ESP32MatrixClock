@@ -1,10 +1,11 @@
 // Turn on debug statements to the serial output
 
-#define  DEBUG_ON 1
+#define  DEBUG_ON 0
+
 #if  DEBUG_ON
-#define PRINT(s, v) { Serial.print(F(s)); Serial.print(v); }    ///< (GENERAL) Print a string followed by a value (decimal)
-#define PRINTX(s, v) { Serial.print(F(s)); Serial.print(v, HEX); }  ///< (GENERAL) Print a string followed by a value (hex)
-#define PRINTS(s) Serial.print(F(s))   ///< (GENERAL) Print a string
+#define PRINT(s, v) { Serial.print(s); Serial.print(v); }    
+#define PRINTX(s, v) { Serial.print(s); Serial.print(v, HEX); }  
+#define PRINTS(s) Serial.print(s)   
 #define PRINTLN Serial.println()
 #else
 #define PRINT(s, v)   
@@ -18,42 +19,35 @@
 // for booting time to enable/disable wifi config
 #define modePin 27
 
-//PPMax72xxPanel definitions
-#define pinCS = 10; // Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
-#define numberOfHorizontalDisplays = 8;
-#define numberOfVerticalDisplays = 1;
+// PPMax72xxPanel definitions
+// Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
+#define pinCS 10
+#define numberOfHorizontalDisplays 8
+#define numberOfVerticalDisplays 1
 
 
-// PPmax72xxAnimate: Zone numbers for the simple time display
+// PPmax72xxAnimate: Zone borders s- Start e- End for the matrix display
 #define H1s  0
-#define H1e  6
+#define H1e  5
 #define H0s  6
-#define H0e 12
-#define M1s 15
-#define M1e 20
+#define H0e 11
+#define M1s 14
+#define M1e 19
 #define M0s 20
 #define M0e 25
 #define S1s 28
-#define S1e 32
-#define S0s 32
-#define S0e 37
+#define S1e 33
+#define S0s 35
+#define S0e 40
 #define I0s  0
 #define I0e 64
-#define I1s 27
+#define I1s 28
 #define I1e 64
 #define I2s  0
 #define I2e 64
 
-// Old to be removed: Zone numbers for the simple time display
-
-#define H1 0
-#define H0 1
-#define M1 2
-#define M0 3
-#define S1 4
-#define S0 5
-#define RR 6
-
+#define ClockAnimTick 50
+#define InfoTick 20
 
 // Time zone definition and DST automatic on/off
 // #define DST_ON true
