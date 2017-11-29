@@ -37,17 +37,18 @@
 #define M0e 25
 #define S1s 28
 #define S1e 33
-#define S0s 35
-#define S0e 40
+#define S0s 34
+#define S0e 39
 #define I0s  0
 #define I0e 64
-#define I1s 28
+#define I1s 30
 #define I1e 64
 #define I2s  0
 #define I2e 64
 
-#define ClockAnimTick 50
-#define InfoTick 20
+#define ClockAnimTick 95
+#define InfoTick  20
+#define InfoTick1 20
 
 // Time zone definition and DST automatic on/off
 // #define DST_ON true
