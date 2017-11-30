@@ -566,7 +566,7 @@ void loop()
           updateDisplay |= zoneClockM0.Animate(false);
           updateDisplay |= zoneClockM1.Animate(false);
 
-            if ( DataDisplayTask.check(1000) ) {
+            if ( DataDisplayTask.check(2000) ) {
               switch (DataMode){
                 case 0:
                    sprintf (DataStr, "%s%02d", monthShortStr(month()), day());
@@ -578,13 +578,16 @@ void loop()
                    sprintf (DataStr, "%s", monthStr(month()));
                    break;
                 case 2: 
-                   sprintf (DataStr, "%c%d%c", 160, (int)(mySensor.readTempC()+0.5), 161);
+                   // sprintf (DataStr, "%c%d%c", 160, (int)(mySensor.readTempC()+0.5), 161);
+                   sprintf (DataStr, "%d%c", (int)(mySensor.readTempC()+0.5), 161);                   
                    break;
                 case 3: 
-                   sprintf (DataStr, "%c%.0f%c", 162, mySensor.readFloatPressure()/100, 163);
+                   //sprintf (DataStr, "%c%.0f%c", 162, mySensor.readFloatPressure()/100, 163);
+                   sprintf (DataStr, "%.0f%c", mySensor.readFloatPressure()/100, 163);                   
                    break;                   
                 case 4: 
-                   sprintf (DataStr, "%c%d%%", 166, (int)(mySensor.readFloatHumidity()+0.5));
+                   //sprintf (DataStr, "%c%d%%", 166, (int)(mySensor.readFloatHumidity()+0.5));
+                   sprintf (DataStr, "%d%%", (int)(mySensor.readFloatHumidity()+0.5));
                    break;                   
                 case 6: 
                    int measurement = hallRead();
