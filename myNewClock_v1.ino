@@ -75,6 +75,14 @@ static int lvalueH = -1;
 static int lvalueM = -1;
 static int lvalueS = -1;   
 
+
+void clearScreen(void) {
+  matrix.setClip(0, matrix.width(), 0, matrix.height());
+  matrix.fillScreen(LOW);
+  matrix.write();    
+}
+
+
 bool newMessageAvailable = false;
 String inString = "";
 void readSerial(void)  {
@@ -287,26 +295,25 @@ uint8_t IntensityMap(uint16_t sensor) {
    return Intensity;  
 }
 
-int8_t keyboard(void) {
-  uint32_t  n;
+uint8_t keyboard(void) {
+  uint8_t  n;
   if (!Q.isEmpty()) {
     Q.pop((uint8_t *)&n);
-    switch(n) {
-      case DIR_CW:
-        Serial.println("+1");
-        break;
-      case DIR_CCW:
-        Serial.println("-1");
-        break;
-      case SW_DOWN:
-        Serial.println("DOWN");
-        break;
-      case SW_UP:
-        Serial.println("UP");
-        break;
-    }  
-  }
-  
+//    switch(n) {
+//      case DIR_CW:
+//        Serial.println("+1");
+//        break;
+//      case DIR_CCW:
+//        Serial.println("-1");
+//        break;
+//      case SW_DOWN:
+//        Serial.println("DOWN");
+//        break;
+//      case SW_UP:
+//        Serial.println("UP");
+//        break;
+//    }  
+  } return n;  
 }
 
 
@@ -451,6 +458,8 @@ void loop()
                     
         case _Clock_simple_time_init:
 
+          clearScreen();
+
           valueH = hour();
           valueM = minute();
           valueS = second();
@@ -466,6 +475,7 @@ void loop()
           matrix.drawChar(S0s,0, (char)('0' + valueS % 10), HIGH, LOW, 1);
           matrix.drawPixel(M0e+1,0,HIGH);
           matrix.drawPixel(M0e+1,1,HIGH);
+          matrix.write();    
 
           updateDisplay = true;
 
@@ -496,10 +506,24 @@ void loop()
           updateDisplay |= zoneClockS1.Animate(false); 
           updateDisplay |= zoneClockS0.Animate(false);
 
-          break;
+          switch(keyboard()) {
+            case DIR_CW:
+                ClockState = ClockState = _Clock_complete_info_init;
+              break;
+            case DIR_CCW:
+                ClockState = ClockState = _Clock_complete_info_init;
+              break;
+            case SW_DOWN:
+              break;
+            case SW_UP:
+              break;
+          }  
+          break;     
 
       case _Clock_complete_info_init:
        
+          clearScreen();
+          
           valueH = hour();
           valueM = minute();
           valueS = second();
@@ -511,12 +535,15 @@ void loop()
           matrix.drawChar(H0s,0, (char)('0' + valueH % 10), HIGH, LOW, 1);
           matrix.drawChar(M1s,0, (char)('0' + valueM / 10), HIGH, LOW, 1);
           matrix.drawChar(M0s,0, (char)('0' + valueM % 10), HIGH, LOW, 1);
+          matrix.write();
 
-          DataDisplayTask.start();
+          DataMode = 0;
+          DataDisplayTask.start(-2000);
+          
           IntensityCheck.start();
           
           PRINTS("Complete Time Init closed\n");
-          
+
           ClockState = _Clock_complete_info;
           break;
 
@@ -539,25 +566,25 @@ void loop()
           updateDisplay |= zoneClockM0.Animate(false);
           updateDisplay |= zoneClockM1.Animate(false);
 
-            if ( DataDisplayTask.check(2000) ) {
+            if ( DataDisplayTask.check(1000) ) {
               switch (DataMode){
                 case 0:
-                   sprintf (DataStr, "%02d%s", day(), monthShortStr(month()));
+                   sprintf (DataStr, "%s%02d", monthShortStr(month()), day());
                    break;
                 case 1:
-                   sprintf (DataStr, "%s", dayStr(weekday()));
+                   sprintf (DataStr, "%s%02d", dayShortStr(weekday()), day());
                    break;
-                case 2: 
+                case 99: 
                    sprintf (DataStr, "%s", monthStr(month()));
                    break;
-                case 3: 
-                   sprintf (DataStr, "T:%d%s", (int)(mySensor.readTempC()+0.5), "C");
+                case 2: 
+                   sprintf (DataStr, "%c%d%c", 160, (int)(mySensor.readTempC()+0.5), 161);
                    break;
-                case 4: 
-                   sprintf (DataStr, "C:%.0f%s", mySensor.readFloatPressure()/100, "HPa");
+                case 3: 
+                   sprintf (DataStr, "%c%.0f%c", 162, mySensor.readFloatPressure()/100, 163);
                    break;                   
-                case 5: 
-                   sprintf (DataStr, "W:%d%%", (int)(mySensor.readFloatHumidity()+0.5));
+                case 4: 
+                   sprintf (DataStr, "%c%d%%", 166, (int)(mySensor.readFloatHumidity()+0.5));
                    break;                   
                 case 6: 
                    int measurement = hallRead();
@@ -569,10 +596,22 @@ void loop()
               PRINTLN;
               //zoneInfo1.setText(DataStr, _SCROLL_LEFT, _TO_LEFT, InfoTick1, I1s, I1e);
               zoneInfo1.setText(DataStr, _SCROLL_UP, _NONE_MOD, InfoTick1, I1s, I1e);
-              DataMode = (DataMode+1) % 7;
+              DataMode = (DataMode+1) % 5;
             }
             updateDisplay |= zoneInfo1.Animate(false);
-          break;          
+            switch(keyboard()) {
+              case DIR_CW:
+                  ClockState = ClockState = _Clock_simple_time_init;
+                break;
+              case DIR_CCW:
+                  ClockState = ClockState = _Clock_simple_time_init;
+                break;
+              case SW_DOWN:
+                break;
+              case SW_UP:
+                break;
+            }  
+            break;          
           
       case _Clock_idle:
           
@@ -602,6 +641,7 @@ void loop()
 
   if (updateDisplay) {
     matrix.write();
+    matrix.setIntensity(intensity);
     updateDisplay = false;
   }
 
