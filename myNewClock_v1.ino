@@ -237,6 +237,7 @@ void SetupWiFi(void) {
     PRINTS("WiFi connected\n");
     PRINTS("IP address: \n");
     PRINTS(WiFi.localIP());
+    PRINTLN;
 }
 
 boolean update_time(int &value, int &lvalue, int newvalue, char what) {
@@ -295,10 +296,22 @@ uint8_t IntensityMap(uint16_t sensor) {
    return Intensity;  
 }
 
+boolean checkTime(uint8_t hh, uint8_t mm, uint8_t ss, boolean exact) {
+  if (exact) return (hh == hour() && mm == minute() && ss == second());
+  else return (hh == hour() && mm == minute() && ss <= second());
+}
+
+
 uint8_t keyboard(void) {
-  uint8_t  n;
+  uint8_t  n=DIR_NONE;
+  noInterrupts();
   if (!Q.isEmpty()) {
-    Q.pop((uint8_t *)&n);
+    Q.pop(&n);
+  }
+  interrupts();
+  return n;  
+}
+
 //    switch(n) {
 //      case DIR_CW:
 //        Serial.println("+1");
@@ -313,13 +326,36 @@ uint8_t keyboard(void) {
 //        Serial.println("UP");
 //        break;
 //    }  
-  } return n;  
+
+
+/* Snake Routines 
+Start => */
+boolean occupied(int ptrA, const int snakeLength, int *snakeX, int *snakeY) {
+  for ( int ptrB = 0 ; ptrB < snakeLength; ptrB++ ) {
+    if ( ptrA != ptrB ) {
+      if ( equal(ptrA, ptrB, snakeX, snakeY) ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
+
+int next(int ptr, const int snakeLength) {
+  return (ptr + 1) % snakeLength;
+}
+
+boolean equal(int ptrA, int ptrB, int *snakeX, int *snakeY) {
+  return snakeX[ptrA] == snakeX[ptrB] && snakeY[ptrA] == snakeY[ptrB];
+}
+/* <= End Snake Routines */
+
 
 
 Schedular NTPUpdateTask; 
 Schedular DataDisplayTask; 
 Schedular IntensityCheck; 
+Schedular SnakeUpdate; 
 
 void setup()
 {
@@ -381,12 +417,17 @@ void setup()
     if (digitalRead(modePin)) {
       SetupWiFi();
       FirstSyncNTP();
-      NTPUpdateTask.start(nextMidnight( now()*1000 + 5000)); 
-      PRINT("Time to sync: ",numberOfMinutes ( nextMidnight( now() ) ) );
+      NTPUpdateTask.start(); 
+      PRINT("Now: ", now()); PRINTLN;
+      PRINT("Prev. midnight +5m ", previousMidnight( now() ) + 300); PRINTLN;
+      PRINT("Time to sync: ", numberOfMinutes( now()- ( (elapsedSecsToday(now())/ SECS_PER_HOUR)*SECS_PER_HOUR+SECS_PER_HOUR))  ); PRINTLN;
       PRINTLN;
     } else {
       PRINTS("No WiFi by setup on GPIO27\n"); 
     }
+
+    //while (true) ;
+
     
     matrix.setClip(0, matrix.width(), 0, matrix.height());
     matrix.fillScreen(LOW);
@@ -409,9 +450,19 @@ void loop()
                           // 23:59:59 Sun 31 Oct 2016 100°C 1000HPa
                           
     static uint8_t DataMode = 0;
+    uint8_t key;
 
     boolean SyncNTPError = false;  // true if the last NTP was finished with an error due the wifi or ntp failure
 
+
+    // Snake variables
+    static int snakeLength = 1;
+    static int snakeX[MaxSnake], snakeY[MaxSnake];
+    static int ptr, nextPtr;
+    static int snakeRound = 0;
+    static SnakeStates_t SnakeState;
+    int attempt;
+    boolean continueLoop = true;
 
   if (IntensityCheck.check(250)) {
     uint16_t lux = lightMeter.readLightLevel();
@@ -432,7 +483,8 @@ void loop()
           break;
           
       case _Clock_NTP_Sync:
-        zoneInfo0.setText("NTP Re-Sync", _SCROLL_LEFT, _TO_FULL, 50, I0s, I0e);
+        PRINTS("NTP Resync started\n");
+        zoneInfo0.setText("NTP Re-Sync", _SCROLL_LEFT, _TO_FULL, InfoTick1, I0s, I0e);
         zoneInfo0.Animate(true);
         if (WiFi.isConnected()) {  
             SyncNTPError = SyncNTP();
@@ -453,7 +505,7 @@ void loop()
               SyncNTPError = true; // wifi failure
             }
         }
-        ClockState = lClockState;
+        ClockState = ClockStates(lClockState-1);
         break;
                     
         case _Clock_simple_time_init:
@@ -475,11 +527,16 @@ void loop()
           matrix.drawChar(S0s,0, (char)('0' + valueS % 10), HIGH, LOW, 1);
           matrix.drawPixel(M0e+1,0,HIGH);
           matrix.drawPixel(M0e+1,1,HIGH);
-          matrix.write();    
+          matrix.drawPixel(H0e+1,2,HIGH);
+          matrix.drawPixel(H0e+1,5,HIGH);          
+//          matrix.write();    
 
           updateDisplay = true;
 
           IntensityCheck.start();
+          SnakeUpdate.start();
+          randomSeed(analogRead(pinRandom)); // Initialize random generator
+          SnakeState = _sInit;
           
           PRINTS("Simple Time Init closed\n");
           
@@ -490,14 +547,14 @@ void loop()
           update_time(valueH, lvalueH, hour(), 'H');
           update_time(valueM, lvalueM, minute(), 'M');
           if ( update_time(valueS, lvalueS, second(), 'S') ) {
-            flasher = !flasher;
-            digitalWrite(ledPin, flasher);
+//            flasher = !flasher;
+//            digitalWrite(ledPin, flasher);
             updateDisplay = true;
             PRINTS(timeClient.getFormattedTime() );
             PRINTLN;
-            matrix.setClip(H0e+1,H0e+2,0,8);
-            matrix.drawPixel(H0e+1,2,flasher);
-            matrix.drawPixel(H0e+1,5,flasher);
+//            matrix.setClip(H0e+1,H0e+2,0,8);
+//            matrix.drawPixel(H0e+1,2,flasher);
+//            matrix.drawPixel(H0e+1,5,flasher);
           }
           updateDisplay |= zoneClockH0.Animate(false);
           updateDisplay |= zoneClockH1.Animate(false);
@@ -506,20 +563,129 @@ void loop()
           updateDisplay |= zoneClockS1.Animate(false); 
           updateDisplay |= zoneClockS0.Animate(false);
 
-          switch(keyboard()) {
+          // Snake animation
+          if (SnakeUpdate.check(SnakeWait) || SnakeState ==_sRunA) {
+              matrix.setClip(SNs,SNe,0,8);
+              updateDisplay = true;
+              switch (SnakeState) {
+                case _sInit:
+//                        PRINTS("\n Init");
+                        matrix.fillScreen(LOW);
+                        for ( ptr = 0; ptr < snakeLength; ptr++ ) {
+                          snakeX[ptr] = SNs+(SNe-SNs) / 2;
+                          snakeY[ptr] = matrix.height() / 2;
+                        }
+                        nextPtr = 0;
+                        snakeLength = 1;
+                        snakeRound = 0;              
+          
+                        SnakeState = _sRunA;
+                        break;
+          
+                case _sRunA:              
+//                        PRINTS("\n State A");
+                        ptr = nextPtr;
+                        nextPtr = next(ptr, snakeLength);
+//                        PRINT("  Xptr ", snakeX[ptr]);
+//                        PRINT("  Yptr ", snakeY[ptr]);
+//                        PRINTLN;
+                        matrix.drawPixel(snakeX[ptr], snakeY[ptr], HIGH); // Draw the head of the snake
+                        SnakeState = _sRunB;
+                        break;      
+                        
+                case _sRunB:
+//                        PRINTS("\n State B");
+                        if ( !occupied(nextPtr, snakeLength, snakeX, snakeY) ) {
+//                          PRINT("  Xptr ", snakeX[ptr]);
+//                          PRINT("  Yptr ", snakeY[ptr]);
+//                          PRINTLN;
+                          matrix.drawPixel(snakeX[nextPtr], snakeY[nextPtr], LOW); // Remove the tail of the snake
+                        }
+                      
+                        continueLoop = true;
+                        for ( attempt = 0; (attempt < SnakeAttempt) && continueLoop ; attempt++ ) {
+                          // Jump at random one step up, down, left, or right
+                          switch ( random(4) ) {
+                            case 0: 
+                                snakeX[nextPtr] = (snakeX[ptr] + 1 >= SNe) ? SNs : snakeX[ptr] + 1;
+                                snakeY[nextPtr] = snakeY[ptr]; 
+                                break;
+                            case 1:
+                                snakeX[nextPtr] = (snakeX[ptr] - 1 < SNs) ? SNe-1 : snakeX[ptr] - 1;      
+                                snakeY[nextPtr] = snakeY[ptr]; 
+                                break;
+                            case 2: 
+                                snakeY[nextPtr] = (snakeY[ptr] + 1 > matrix.height()-1)? 0 : snakeY[ptr] + 1;
+                                snakeX[nextPtr] = snakeX[ptr]; 
+                                break;
+                            case 3:
+                                snakeY[nextPtr] = (snakeY[ptr] - 1 < 0)? matrix.height()-1 : snakeY[ptr] - 1;
+                                snakeX[nextPtr] = snakeX[ptr]; 
+                                break;
+                          }    
+                          continueLoop = occupied(nextPtr, snakeLength, snakeX, snakeY);
+                        }
+                        if (attempt == SnakeAttempt) { 
+                          matrix.fillScreen(HIGH);
+                          SnakeState = _sFail;
+                        } else {
+                            snakeRound = (snakeRound +1) % SankeNextRound;
+                            if (snakeRound == 0) snakeLength = snakeLength + 1;
+                            if (snakeLength >= MaxSnake) {
+                               matrix.fillScreen(HIGH);
+                               SnakeState = _sFail;
+                            }  else SnakeState = _sRunA;  
+                        }
+                        break;
+                case _sFail:
+//                        PRINTS("\n Fail");
+                        SnakeState = _sInit;
+                        break;
+              }
+          }
+#if 1
+          key = keyboard();
+          switch(key) {
             case DIR_CW:
-                ClockState = ClockState = _Clock_complete_info_init;
+                ClockState = _Clock_complete_info_init;
               break;
             case DIR_CCW:
-                ClockState = ClockState = _Clock_complete_info_init;
+                ClockState = _Clock_alarm_init;
               break;
             case SW_DOWN:
               break;
             case SW_UP:
               break;
-          }  
+          }
+          if (key != DIR_NONE) PRINT("New Closk State: ", ClockState);
+#endif     
           break;     
 
+      case _Clock_alarm_init:
+          zoneInfo0.setText("Set Up Alarm", _SCROLL_LEFT, _TO_LEFT, InfoTick, I0s, I0e);
+          updateDisplay = false;
+          ClockState = _Clock_alarm;
+          PRINTS("Alarm Init closed\n");
+      case _Clock_alarm:
+          //PRINTS("Alarm\n");
+          updateDisplay = zoneInfo0.Animate(false);
+          if (zoneInfo0.AnimateDone()) zoneInfo0.Reset();
+          key = keyboard();
+          switch(key) {
+            case DIR_CW:
+                ClockState = _Clock_complete_info_init;
+              break;
+            case DIR_CCW:
+                ClockState = _Clock_simple_time_init;
+              break;
+            case SW_DOWN:
+              break;
+            case SW_UP:
+              break;
+          }
+          if (key != DIR_NONE) PRINT("New Closk State: ", ClockState);
+          break;     
+      
       case _Clock_complete_info_init:
        
           clearScreen();
@@ -602,18 +768,21 @@ void loop()
               DataMode = (DataMode+1) % 5;
             }
             updateDisplay |= zoneInfo1.Animate(false);
-            switch(keyboard()) {
-              case DIR_CW:
-                  ClockState = ClockState = _Clock_simple_time_init;
+
+          key = keyboard();
+          switch(key) {
+            case DIR_CW:
+                  ClockState = _Clock_simple_time_init;
                 break;
               case DIR_CCW:
-                  ClockState = ClockState = _Clock_simple_time_init;
+                  ClockState = _Clock_alarm_init;
                 break;
               case SW_DOWN:
                 break;
               case SW_UP:
                 break;
             }  
+            if (key != DIR_NONE) PRINT("New Closk State: ", ClockState);
             break;          
           
       case _Clock_idle:
@@ -668,14 +837,14 @@ void processButton() {
         SWPrev = 0;
         x = SW_DOWN;
         Q.push((uint8_t *)&x);
-        // Serial.print("\nDown");
+        PRINTS("\nDown\n");
       } 
    } else { 
       if (SWPrev == 0) {
         SWPrev = 1;
         x = SW_UP;
         Q.push((uint8_t *)&x);
-        // Serial.print("\nUp");
+        PRINTS("\nUp\n");
       } 
    }
 }
@@ -683,11 +852,9 @@ void processButton() {
 void processEncoder () 
 {
   uint8_t x = R.read();
-  if (x) 
-  {
-    PRINTS((x == DIR_CW ? "\n+1" : "\n-1"));
-    PRINTLN;
-    Q.push((uint8_t *)&x);
+  if (x)   {
+    PRINTS((x == DIR_CW ? "\n+1\n" : "\n-1\n"));
+    Q.push(&x);
   }
 }
 

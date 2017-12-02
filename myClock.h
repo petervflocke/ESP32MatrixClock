@@ -46,9 +46,17 @@
 #define I2s  0
 #define I2e 64
 
+#define SNs 40
+#define SNe 64
+#define MaxSnake 64
+#define SnakeAttempt 10
+#define SankeNextRound 10
+#define pinRandom 32
+#define SnakeWait 50
+
 #define ClockAnimTick 95
 #define InfoTick  20
-#define InfoTick1 20
+#define InfoTick1 25
 
 // Time zone definition and DST automatic on/off
 // #define DST_ON true
@@ -56,7 +64,7 @@
 #define CET  1
 // Define time to resync
 // 12h
-#define NTPRESYNC 43200
+#define NTPRESYNC 3600000
 // 1h
 #define NTPRESYNC_Err 3600
 
@@ -69,6 +77,8 @@ enum ClockStates
    _Clock_simple_time,
    _Clock_complete_info_init,
    _Clock_complete_info,
+   _Clock_alarm_init,
+   _Clock_alarm,
    _Clock_idle
 };
 
@@ -77,4 +87,14 @@ enum DataStates
    _Data_Day,
    _Data_Month
 };
+
+
+enum SnakeStates_t
+{
+   _sInit,
+   _sRunA,
+   _sRunB,
+   _sFail,
+};
+
 
