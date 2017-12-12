@@ -1,16 +1,25 @@
 /*
  *  Under development, somehow produtive :)
  *
- *
  */
 
 #include "myClock.h"  
 #include <TimeLib.h>
-
 #include <SPI.h>
+#include <Wire.h>
 #include <Adafruit_GFX.h>
+#include <WiFi.h>
+#include <WiFiManager.h>   
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include <MD_CirQueue.h>
+#include <MD_REncoder.h>
+#include <BH1750.h>
+#include <SparkFunBME280.h>
+#include "DFRobotDFPlayerMini.h"
 #include <PPMax72xxPanel.h>
 #include <PPmax72xxAnimate.h>
+#include <myScheduler.h>
 
 PPMax72xxPanel matrix = PPMax72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
 PPmax72xxAnimate zoneClockH0 = PPmax72xxAnimate(&matrix);
@@ -24,36 +33,15 @@ PPmax72xxAnimate zoneInfo0 = PPmax72xxAnimate(&matrix);
 PPmax72xxAnimate zoneInfo1 = PPmax72xxAnimate(&matrix);
 //PPmax72xxAnimate zoneInfo2 = PPmax72xxAnimate(&matrix);
 
-
-#include <WiFi.h>
-#include <WiFiManager.h>   
-#include <WiFiUdp.h>
-#include <NTPClient.h>
-
-#include <myScheduler.h>
-
-#include <Wire.h>
-#include <BH1750.h>
-#include <SparkFunBME280.h>
-
 BH1750 lightMeter;
 BME280 mySensor;
 
-Schedular SensorUpdate(_Seconds); 
-temp_T tempTable[NumberOfPoints];
+temp_t tempTable[NumberOfPoints];
+temp_t humiTable[NumberOfPoints];
+temp_t presTable[NumberOfPoints];
 
-
-#include <MD_CirQueue.h>
-const uint8_t  QUEUE_SIZE = 15;
+//const uint8_t  QUEUE_SIZE = 15;
 MD_CirQueue Q(QUEUE_SIZE, sizeof(uint8_t));
-
-#include <MD_REncoder.h>
-#define PIN_A 13
-#define PIN_B 15
-
-#define PIN_BUT 12
-#define SW_DOWN 'D'
-#define SW_UP 'U'
 
 // set up encoder object
 MD_REncoder R = MD_REncoder(PIN_A, PIN_B);
@@ -66,6 +54,21 @@ boolean SyncNTPError = false;  // true if the last NTP was finished with an erro
 
 ClockStates ClockState  = _Clock_init;  // current clock status
 ClockStates goBackState = _Clock_init;  // last clock status
+
+
+Schedular SensorUpdate(_Seconds);     // how often are the sensor read
+Schedular NTPUpdateTask(_Minutes);    // how often is the clock synced with NTP server
+Schedular DataDisplayTask(_Millis);   // scroll over to the next type of info for a full clock info mode 
+Schedular IntensityCheck(_Millis);    // how oftenshall be check the light to stear the intensity of LED Matrix
+Schedular SnakeUpdate(_Millis);       // for the snake next step
+Schedular StatTask(_Millis);          // update statistic screen period
+Schedular SecondsVA(_Millis);         // delay for getting VA back to zero
+Schedular ScreenSaver(_Seconds);      // LED Matrix standby time after last PIR movement detection
+Schedular ChimeQuarter(_Minutes);     // time for qurterly chime
+Schedular ChimeHour(_Minutes);        // time for hourly chime
+Schedular ChimeWait(_Millis);         // time to wait after 4 quarter chime
+
+
 
 void clearScreen(void) {
   matrix.setClip(0, matrix.width(), 0, matrix.height());
@@ -299,13 +302,6 @@ boolean equal(int ptrA, int ptrB, int *snakeX, int *snakeY) {
 }
 /* <= End Snake Routines */
 
-Schedular NTPUpdateTask(_Seconds); 
-Schedular DataDisplayTask(_Millis); 
-Schedular IntensityCheck(_Millis); 
-Schedular SnakeUpdate(_Millis);
-Schedular StatTask(_Millis); 
-
-
 void setup()
 {
  //   #if  DEBUG_ON
@@ -316,17 +312,18 @@ void setup()
 
     pinMode(ledPin,  OUTPUT); // passing seconds LED
     pinMode(modePin, INPUT_PULLUP); // check setup
+    pinMode(pirPin, INPUT); // input from PIR sensor
          
     matrix.setIntensity(0); // Use a value between 0 and 15 for brightness
   
-    matrix.setPosition(0, 7, 0); matrix.setRotation(0, 2);    
-    matrix.setPosition(1, 6, 0); matrix.setRotation(1, 2);
-    matrix.setPosition(2, 5, 0); matrix.setRotation(2, 2);
-    matrix.setPosition(3, 4, 0); matrix.setRotation(3, 2);
-    matrix.setPosition(4, 3, 0); matrix.setRotation(4, 2);
-    matrix.setPosition(5, 2, 0); matrix.setRotation(5, 2);
-    matrix.setPosition(6, 1, 0); matrix.setRotation(6, 2);
-    matrix.setPosition(7, 0, 0); matrix.setRotation(7, 2);
+    matrix.setPosition(0, 7, 0); matrix.setRotation(0, 3);    
+    matrix.setPosition(1, 6, 0); matrix.setRotation(1, 3);
+    matrix.setPosition(2, 5, 0); matrix.setRotation(2, 3);
+    matrix.setPosition(3, 4, 0); matrix.setRotation(3, 3);
+    matrix.setPosition(4, 3, 0); matrix.setRotation(4, 3);
+    matrix.setPosition(5, 2, 0); matrix.setRotation(5, 3);
+    matrix.setPosition(6, 1, 0); matrix.setRotation(6, 3);
+    matrix.setPosition(7, 0, 0); matrix.setRotation(7, 3);
 
     matrix.fillScreen(LOW);
     matrix.setCursor(0,0);
@@ -363,6 +360,9 @@ void setup()
 
     // zero temperature table
     for (int i=0; i < NumberOfPoints; tempTable[i++]=0);
+    for (int i=0; i < NumberOfPoints; humiTable[i++]=0);
+    for (int i=0; i < NumberOfPoints; presTable[i++]=0);
+    
     IntensityCheck.start();
     matrix.setIntensity(IntensityMap(lightMeter.readLightLevel())); 
     zoneInfo0.setText("Starting Clock ...", _SCROLL_LEFT, _TO_LEFT, 12, I0s, I0e);
@@ -391,8 +391,12 @@ void setup()
   //      PRINT("(11-(hour()%12))*3600: ", (11-hour()%12)*SECS_PER_HOUR); PRINTLN;
   //      PRINT("(60-minute())*60: ", (60-minute())*60); PRINTLN;
         // sync every 12 hours at 12:05 or 24:05 
-        PRINT("Seconds to sync: ", (11-(hour()%12))*SECS_PER_HOUR+(60-minute()+10)*SECS_PER_MIN+60-second()); PRINTLN;
-        NTPUpdateTask.start( (11-(hour()%12))*SECS_PER_HOUR+(60-minute()+10)*SECS_PER_MIN+60-second() );
+        //PRINT("Seconds to sync at 12:10: ", (11-(hour()%12))*SECS_PER_HOUR+(60-minute()+10)*SECS_PER_MIN+60-second() ); PRINTLN;
+        PRINT("   Mins to sync at 12:10: ", (11-(hour()%12))*60+60-minute()+10 - NTPRESYNC); PRINTLN;
+        PRINT("   Mins to sync:at     H: ", 60-minute()-CHIMEH ); PRINTLN;
+        PRINT("   Mins to sync:at   x15: ", 60-minute()- ( (int)(60-minute())/(int)15)*15 - CHIMEQ); PRINTLN;
+        NTPUpdateTask.start( (11-(hour()%12))*60+60-minute()+10 - NTPRESYNC);
+        
         zoneInfo0.setText("Sync OK", _SCROLL_LEFT, _TO_LEFT, InfoTick1, I0s, I0e);
         zoneInfo0.Animate(true);
         delay(250);
@@ -406,6 +410,14 @@ void setup()
       zoneInfo0.setText("WiFi Off", _SCROLL_LEFT, _TO_LEFT, InfoTick1, I0s, I0e);
       zoneInfo0.Animate(true);
     }
+
+    SecondsVA.start();
+    ScreenSaver.start();
+
+    ChimeQuarter.start( 60-minute()- ( (int)(60-minute())/(int)15)*15 - CHIMEQ );
+    ChimeHour.start( 60-minute()-CHIMEH );   
+    
+    
     matrix.setClip(0, matrix.width(), 0, matrix.height());
     matrix.fillScreen(LOW);
     matrix.write();    
@@ -424,7 +436,6 @@ void loop()
     static int lvalueM = -1;
     static int lvalueS = -1;   
     
-    
     static bool flasher = false;          // seconds passing flasher
     static uint8_t intensity = 0;         // brithness of the led matrix - all modules
     static uint8_t lintensity = 0;        // last brithness of the led matrix - all modules
@@ -441,12 +452,26 @@ void loop()
     // index for tables with measurements
     static uint8_t dayNumber = 0 ; 
     static unsigned long measurementNumber = 1;
-    static temp_T tempMin = +10000;
-    static temp_T tempMax = -10000;
-    temp_T tmpValue, tmpValue2;
-    textEffect_t textEffect;
-    
 
+    static temp_t tempMin = +10000;
+    static temp_t tempMax = -10000;
+    static humi_t humiMin = +10000;
+    static humi_t humiMax = -10000;
+    static pres_t presMin = +10000;
+    static pres_t presMax = -10000;
+    
+    temp_t tempValue;
+    pres_t presValue;
+    humi_t humiValue;
+    int    intValue;
+        
+    static temp_t averageTemp=0;
+    static humi_t averageHumi=0;
+    static pres_t averagePres=0;
+    
+    textEffect_t textEffect;
+    unsigned int infoTime;
+    
 //    int16_t  tx1, ty1;
 //    uint16_t tw, th;    
 //    boolean decPoint;
@@ -459,16 +484,27 @@ void loop()
     static SnakeStates_t SnakeState;
     int attempt;
     boolean continueLoop = true;
+
+    static byte VAValue;
+
+    static bool screenSaverNotActive = true;
   
   if (SensorUpdate.check(MeasurementFreg)) {
-    tmpValue  = (mySensor.readTempC()*PrecTemp);
-    tmpValue2 = tempTable[dayNumber];
-    tempTable[dayNumber] = tmpValue2 + (tmpValue-tmpValue2)/measurementNumber;
-//      PRINT("Day: ", dayNumber);
-//      PRINT("   Measuremeant: ", measurementNumber);
-//      PRINT("  Temp: ", tmpValue);
-//      PRINT("  Aver Temp: ", tempTable[dayNumber]);
-//      PRINTLN;
+
+    averageTemp = tempTable[dayNumber] + (mySensor.readTempC()-tempTable[dayNumber])/measurementNumber;
+    tempTable[dayNumber] = averageTemp;
+
+    averagePres = presTable[dayNumber] + (mySensor.readFloatPressure()/100-presTable[dayNumber])/measurementNumber;
+    presTable[dayNumber] = averagePres;
+
+    averageHumi = humiTable[dayNumber] + (mySensor.readFloatHumidity()-humiTable[dayNumber])/measurementNumber;
+    humiTable[dayNumber] = averageHumi;
+  
+//    PRINT("Day: ", dayNumber);
+//    PRINT("   Measuremeant: ", measurementNumber);
+//    PRINT("  Aver humi: ", humiTable[dayNumber]);
+//    PRINTLN;
+    
     measurementNumber++;
     if (measurementNumber >= MaxMeasurements) {
       measurementNumber = 1;
@@ -477,13 +513,26 @@ void loop()
       if (dayNumber >= NumberOfPoints ) {
         for (int ii = 0; ii <= NumberOfPoints-2; ii++) {
           tempTable[ii] = tempTable[ii+1];
+          presTable[ii] = presTable[ii+1];
+          humiTable[ii] = humiTable[ii+1];
         }
         tempTable[NumberOfPoints-1] = 0;
         dayNumber = NumberOfPoints-1;
       }
     }
   }
-  
+
+  if (second()==59) {
+    if (SecondsVA.check(VADelay)) {
+      VAValue -= VADec;
+      if (VAValue<MinV) VAValue = MinV;
+      dacWrite(DACOut, VAValue);
+    }
+  } else {
+    VAValue = MaxV;
+    dacWrite(DACOut, map(second(), 0, 59, MinV, MaxV));   
+  }
+   
   // check the light to setup matrix intensivity after a final write
   if (IntensityCheck.check(IntensityWait)) {
     uint16_t lux = lightMeter.readLightLevel();
@@ -494,6 +543,20 @@ void loop()
     if (intensity != lintensity) {
       //matrix.setIntensity(intensity);
       lintensity = intensity;
+    }
+
+    // check and activate screen saver mode max7219 -> shutdown mode and (re)set screenSaverNotActive flag for matrix.write 
+    if (digitalRead(pirPin)) {
+      ScreenSaver.start();
+      digitalWrite(ledPin, LOW);
+      matrix.shutdown(false);
+      screenSaverNotActive = true;
+    } else {
+      if (ScreenSaver.check(ScreenTimeOut)) {
+        digitalWrite(ledPin, HIGH);
+        matrix.shutdown(true);
+        screenSaverNotActive = false;
+      }
     }
   }
 
@@ -510,7 +573,21 @@ void loop()
 
   // check time dependant actions
 
-  // .....   
+
+  if (ChimeQuarter.check(CHIMEQ)) {
+   int fileNumber = minute() / 15;
+   PRINT("Minute", minute()); PRINTLN;
+   PRINT("Play file number", fileNumber); PRINTLN;
+   ChimeWait.start();
+  }
+  if (ChimeWait.check(CHIMEW)) {
+    if (ChimeHour.check(CHIMEH)) {
+      int fileNumber = hour();
+      PRINT("Hour", hour()); PRINTLN;
+      PRINT("Play file number", fileNumber); PRINTLN;
+    }
+  }
+
 
   // cehck the current clock / display status
   switch(ClockState)
@@ -542,43 +619,78 @@ void loop()
           tempMin = tempTable[0];
           tempMax = tempTable[0];
           for (ptr=0; ptr < dayNumber; ptr++) {
-            tmpValue = tempTable[ptr];
+            tempValue = tempTable[ptr];
           
-            PRINT("tmpValue : ", tmpValue);
-            PRINT("  min : ", tempMin);
-            PRINT("  max : ", tempMax);
-            PRINTLN;
+//            PRINT("tempValue : ", tempValue);
+//            PRINT("  min : ", tempMin);
+//            PRINT("  max : ", tempMax);
+//            PRINTLN;
 
-            if (tmpValue < tempMin) tempMin = tmpValue;
-            if (tmpValue > tempMax) tempMax = tmpValue;
+            if (tempValue < tempMin) tempMin = tempValue;
+            if (tempValue > tempMax) tempMax = tempValue;
+
+            presValue = presTable[ptr];
+            if (presValue < presMin) presMin = presValue;
+            if (presValue > presMax) presMax = presValue;
+
+            humiValue = humiTable[ptr];
+            if (humiValue < humiMin) humiMin = humiValue;
+            if (humiValue > humiMax) humiMax = humiValue;
           }
           if (tempMax-tempMin < 8) tempMax = tempMin+8;
-
+          if (presMax-presMin < 8) presMax = presMin+8;
+          if (humiMax-humiMin < 8) humiMax = humiMin+8;
+          
           goBackState = _Clock_Temp_init;
           ClockState = _Clock_Temp;
+          DataMode = 0;
           break;
 
       case _Clock_Temp:
 
-          if (StatTask.check(20)) {
+          if (StatTask.check(DiagramDelay)) {
             clearScreen();            
+            matrix.setCursor(0,0);
+            switch (DataMode) {
+              case 0:
+                  matrix.print("T");
+                  break;
+              case 1:
+                  matrix.print("P");
+                  break;
+              case 2:
+                  matrix.print("H");
+                break;
+            }
             for (ptr = 0; ptr <= dayNumber; ptr++) {
-              int xtmpValue = map(tempTable[ptr], tempMin, tempMax, 0, 8);
-              // xtmpValue = constrain(xtmpValue, 0, 8);
-  
+                switch (DataMode) {
+                  case 0:
+                      intValue = map(tempTable[ptr], tempMin, tempMax, 0, 8);                
+                      break;
+                  case 1:
+                      intValue = map(presTable[ptr], presMin, presMax, 0, 8);                
+                      break;
+                  case 2:
+                      intValue = map(humiTable[ptr], humiMin, humiMax, 0, 8);                
+                      break;
+                }
+                intValue = constrain(intValue, 0, 8);
+
 //              PRINT("i: ", ptr);
-//              PRINT("  Table: ", tempTable[ptr]);
-//              PRINT("  Temp : ", xtmpValue);
+//              PRINT("  Table: ", intValue);
 //              PRINT("  min : ", tempMin);
 //              PRINT("  max : ", tempMax);
 //              PRINTLN;
-  
-              matrix.drawFastVLine(ptr, 8-xtmpValue, xtmpValue, HIGH);
+
+              matrix.drawFastVLine(ptr+ShiftDiagram, 8-intValue, intValue, HIGH);
             }
             updateDisplay = true;
           }
-          key = keyboard(_Clock_complete_info_init, _Clock_simple_time_init, _Clock_none, _Clock_none);
-          break;           
+          if (keyboard(_Clock_complete_info_init, _Clock_simple_time_init, _Clock_none, _Clock_none) == SW_UP) {
+            DataMode = (DataMode+1)%3;
+            StatTask.check(-DiagramDelay);
+          }
+          break;
                              
       case _Clock_simple_time_init:
 
@@ -788,7 +900,7 @@ void loop()
           updateDisplay |= zoneClockM0.Animate(false);
           updateDisplay |= zoneClockM1.Animate(false);
 
-          if ( DataDisplayTask.check(2000) ) {
+          if ( DataDisplayTask.check(FullInfoDelay) ) {
             switch (DataMode){
               case 0:
                  sprintf (DataStr, "%s%02d", monthShortStr(month()), day());
@@ -804,42 +916,30 @@ void loop()
                  break;
               case 2: 
                  // sprintf (DataStr, "%c%d%c", 160, (int)(mySensor.readTempC()+0.5), 161);
-                 tmpValue  = tempTable[dayNumber];
-                 tmpValue2 = mySensor.readTempC();
-                 sprintf (DataStr, "%d%c", (int)(tmpValue2+0.5), 161);                  
-                 tmpValue2 *= PrecTemp;
-                 
-                 // textEffect = tmpValue2 > tmpValue ? _SCROLL_UP : tmpValue2 < tmpValue ? _SCROLL_DOWN:_SCROLL_LEFT;
-                 if (tmpValue2 > tmpValue) {
-                   textEffect = _SCROLL_UP;                    
-
-                   PRINTS("UP\n");
-                   
-                 } else if (tmpValue2 < tmpValue) {
-
-                   PRINTS("DOWN\n");
-                   
-                   textEffect = _SCROLL_DOWN;                                     
-                 } else {
-
-                   PRINTS("LEFT\n");
-                  
-                   textEffect = _SCROLL_LEFT;
-                 }
-                 
-
-                 
-                 
+                 tempValue = round(mySensor.readTempC());
+                 sprintf (DataStr, "%d%c", (int)(tempValue), 161);                  
+                 textEffect = tempValue > round(averageTemp) ? _SCROLL_UP : tempValue < round(averageTemp) ? _SCROLL_DOWN:_SCROLL_LEFT;
                  break;
               case 3: 
                  //sprintf (DataStr, "%c%.0f%c", 162, mySensor.readFloatPressure()/100, 163);
-                 sprintf (DataStr, "%.0f%c", mySensor.readFloatPressure()/100, 163);        
-                 textEffect = _SCROLL_LEFT;
+
+                 presValue = round(mySensor.readFloatPressure()/100);
+                 sprintf (DataStr, "%.0f%c", presValue, 163);        
+                 textEffect = presValue > round(averagePres) ? _SCROLL_UP : presValue < round(averagePres) ? _SCROLL_DOWN:_SCROLL_LEFT;
+                 //textEffect = _SCROLL_LEFT;
                  break;                   
               case 4: 
                  //sprintf (DataStr, "%c%d%%", 166, (int)(mySensor.readFloatHumidity()+0.5));
-                 sprintf (DataStr, "%d%%", (int)(mySensor.readFloatHumidity()+0.5));
-                 textEffect = _SCROLL_LEFT;
+                 humiValue = round(mySensor.readFloatHumidity());
+                 sprintf (DataStr, "%d%%", (int)(humiValue));
+
+//                 PRINT("Day:", dayNumber);
+//                 PRINT("  Srednia:", round(averageHumi));
+//                 PRINT("  Sensor: ", humiValue)
+//                 PRINTLN;
+
+                 textEffect = humiValue > round(averageHumi) ? _SCROLL_UP : humiValue < round(averageHumi) ? _SCROLL_DOWN:_SCROLL_LEFT;
+                 //textEffect = _SCROLL_LEFT;
                  break;                   
               case 6: 
                  int measurement = hallRead();
@@ -848,13 +948,15 @@ void loop()
                  textEffect = _SCROLL_LEFT;
                  break;                   
             }
-//            PRINTS(DataStr);PRINTLN;
-            //zoneInfo1.setText(DataStr, _SCROLL_LEFT, _TO_LEFT, InfoTick1, I1s, I1e);
-            zoneInfo1.setText(DataStr, textEffect, _TO_LEFT, InfoTick, I1s, I1e);
+            infoTime = textEffect == _SCROLL_LEFT? InfoQuick : InfoSlow;
+            zoneInfo1.setText(DataStr, textEffect, _TO_LEFT, infoTime, I1s, I1e);
             DataMode = (DataMode+1) % 5;
           }
           updateDisplay |= zoneInfo1.Animate(false);
-          key = keyboard(_Clock_simple_time_init, _Clock_alarm_init, _Clock_none, _Clock_none);
+          if (keyboard(_Clock_simple_time_init, _Clock_alarm_init, _Clock_none, _Clock_none) == SW_UP) {
+            DataMode = (DataMode+1) % 5;
+            DataDisplayTask.start(-FullInfoDelay);
+          }
           break;          
           
       case _Clock_idle:
@@ -864,8 +966,10 @@ void loop()
   }
 
   if (updateDisplay) {
-    matrix.write();
-    matrix.setIntensity(intensity);
+    if (screenSaverNotActive) {
+      matrix.write();
+      matrix.setIntensity(intensity);
+    }
     updateDisplay = false;
   }
 

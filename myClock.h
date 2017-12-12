@@ -21,6 +21,28 @@
 // for booting time to enable/disable wifi config
 #define modePin 27
 
+// set up encoder object and button
+// MD_REncoder R = MD_REncoder(PIN_A, PIN_B);
+#define PIN_A 13
+#define PIN_B 15
+#define PIN_BUT 12
+#define SW_DOWN 'D'
+#define SW_UP 'U'
+
+// define number of objects/rotary & button events to be save in the keyboard queue
+#define QUEUE_SIZE 15
+
+// DAC out
+#define DACOut     25
+#define MaxV      255
+#define MinV        5
+#define VADelay    25
+#define VADec       5
+
+#define pirPin     14
+#define DarkLevel  50
+#define ScreenTimeOut 300
+
 // PPMax72xxPanel definitions
 // Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
 #define pinCS 10
@@ -28,12 +50,14 @@
 #define numberOfVerticalDisplays 1
 
 // numberOfHorizontalDisplays*8
-#define NumberOfPoints 64
+#define NumberOfPoints 56
+#define ShiftDiagram 8
 #define MeasurementFreg 1
 // #define MaxMeasurements SECS_PER_DAY
-#define MaxMeasurements 10
-#define PrecTemp 10
-typedef float temp_T;
+#define MaxMeasurements SECS_PER_DAY
+typedef float temp_t;
+typedef float humi_t;
+typedef float pres_t;
 
 // PPmax72xxAnimate: Zone borders s- Start e- End for the matrix display
 #define H1s  0
@@ -66,6 +90,11 @@ typedef float temp_T;
 #define ClockAnimTick 95
 #define InfoTick  15
 #define InfoTick1 25
+#define InfoSlow  100
+#define InfoQuick 18
+#define FullInfoDelay 2000
+#define DiagramDelay 200
+
 #define IntensityWait 250
 
 // Time zone definition and DST automatic on/off
@@ -73,8 +102,15 @@ typedef float temp_T;
 #define CEST 2
 #define CET  1
 // Define time to resync
-// 12h = 12*60*60=43200
-#define NTPRESYNC 43200
+// 12h = 12*60=720
+#define NTPRESYNC 720
+// define next minutes to next hour for a hour chime 
+#define CHIMEH 60
+// time of the 4 quorter chime in ms
+#define CHIMEW 4200
+// define next minutes to next qurter for a qurter chime 
+#define CHIMEQ 15
+
 
 enum ClockStates
 {
@@ -106,5 +142,4 @@ enum SnakeStates_t
    _sRunB,
    _sFail,
 };
-
 
