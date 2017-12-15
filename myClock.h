@@ -20,6 +20,9 @@
 #define ledPin 2
 // for booting time to enable/disable wifi config
 #define modePin 27
+// MP3 pins
+#define MP3RX 16
+#define MP3TX 17
 
 // set up encoder object and button
 // MD_REncoder R = MD_REncoder(PIN_A, PIN_B);
@@ -78,6 +81,10 @@ typedef float pres_t;
 #define I1e 64
 #define I2s  0
 #define I2e 64
+#define MEs  0
+#define MEe 40
+#define PAs 41
+#define PAe 64
 
 #define SNs 40
 #define SNe 64
@@ -102,14 +109,16 @@ typedef float pres_t;
 #define CEST 2
 #define CET  1
 // Define time to resync
-// 12h = 12*60=720
-#define NTPRESYNC 720
-// define next minutes to next hour for a hour chime 
-#define CHIMEH 60
-// time of the 4 quorter chime in ms
+// 12h = 12*60*60=720
+#define NTPRESYNC 43200
+// define next to next hour for a hour chime 
+#define CHIMEH 3600
+// time of the 4. quorter chime in ms
 #define CHIMEW 4200
-// define next minutes to next qurter for a qurter chime 
-#define CHIMEQ 15
+// define next seconds to next qurter for a qurter chime 
+#define CHIMEQ 900
+#define DingON   9
+#define DingOFF 23
 
 
 enum ClockStates
@@ -120,8 +129,8 @@ enum ClockStates
    _Clock_simple_time,
    _Clock_complete_info_init,
    _Clock_complete_info,
-   _Clock_alarm_init,
-   _Clock_alarm,
+   _Clock_menu_init,
+   _Clock_menu,
    _Clock_Temp_init,
    _Clock_Temp,   
    _Clock_idle,

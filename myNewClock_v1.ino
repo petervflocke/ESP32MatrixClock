@@ -20,6 +20,8 @@
 #include <PPMax72xxPanel.h>
 #include <PPmax72xxAnimate.h>
 #include <myScheduler.h>
+#include <Preferences.h>
+
 
 PPMax72xxPanel matrix = PPMax72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
 PPmax72xxAnimate zoneClockH0 = PPmax72xxAnimate(&matrix);
@@ -57,17 +59,26 @@ ClockStates goBackState = _Clock_init;  // last clock status
 
 
 Schedular SensorUpdate(_Seconds);     // how often are the sensor read
-Schedular NTPUpdateTask(_Minutes);    // how often is the clock synced with NTP server
+Schedular NTPUpdateTask(_Seconds);    // how often is the clock synced with NTP server
 Schedular DataDisplayTask(_Millis);   // scroll over to the next type of info for a full clock info mode 
 Schedular IntensityCheck(_Millis);    // how oftenshall be check the light to stear the intensity of LED Matrix
 Schedular SnakeUpdate(_Millis);       // for the snake next step
 Schedular StatTask(_Millis);          // update statistic screen period
 Schedular SecondsVA(_Millis);         // delay for getting VA back to zero
 Schedular ScreenSaver(_Seconds);      // LED Matrix standby time after last PIR movement detection
-Schedular ChimeQuarter(_Minutes);     // time for qurterly chime
-Schedular ChimeHour(_Minutes);        // time for hourly chime
+Schedular ChimeQuarter(_Seconds);     // time for qurterly chime
+Schedular ChimeHour(_Seconds);        // time for hourly chime
 Schedular ChimeWait(_Millis);         // time to wait after 4 quarter chime
 
+
+// MP3 Player
+HardwareSerial DFPSerial(1);
+DFRobotDFPlayerMini DFPlayer;
+
+
+// Parameter section, just one for the time being
+Preferences preferences;
+boolean DingOnOff = true;
 
 
 void clearScreen(void) {
@@ -302,19 +313,47 @@ boolean equal(int ptrA, int ptrB, int *snakeX, int *snakeY) {
 }
 /* <= End Snake Routines */
 
+void loadPreferences(void) {
+    preferences.begin("clock", false);
+    //preferences.clear();
+    DingOnOff = preferences.getBool("DingOnOff", true);
+    preferences.end();
+}
+
+void savePreferences(void) {
+    preferences.begin("clock", false);
+    //preferences.clear();
+    preferences.putBool("DingOnOff", DingOnOff);
+    preferences.end();
+}
+
+
 void setup()
 {
  //   #if  DEBUG_ON
       Serial.begin(115200);
       PRINTS("Clock started\n");
 //    #endif 
-    delay(100);    
+
+    loadPreferences();
+
+    // start serial interface for MP3 player
+    DFPSerial.begin(9600, SERIAL_8N1, MP3RX, MP3TX);  // speed, type, RX, TX
+
+    delay(250);    // Delay needed to initiate the serial interface(s)
+
+    // SetUp Sensors
+    Wire.begin(21,22, 400000);
+    //  ADDR=0 => 0x23 and ADDR=1 => 0x5C.
+    lightMeter.begin();
+      
 
     pinMode(ledPin,  OUTPUT); // passing seconds LED
     pinMode(modePin, INPUT_PULLUP); // check setup
     pinMode(pirPin, INPUT); // input from PIR sensor
          
-    matrix.setIntensity(0); // Use a value between 0 and 15 for brightness
+    // matrix.setIntensity(0); // Use a value between 0 and 15 for brightness
+    matrix.setIntensity(IntensityMap(lightMeter.readLightLevel()));     
   
     matrix.setPosition(0, 7, 0); matrix.setRotation(0, 3);    
     matrix.setPosition(1, 6, 0); matrix.setRotation(1, 3);
@@ -326,10 +365,38 @@ void setup()
     matrix.setPosition(7, 0, 0); matrix.setRotation(7, 3);
 
     matrix.fillScreen(LOW);
-    matrix.setCursor(0,0);
     //matrix.setTextColor(HIGH);
     matrix.setTextColor(HIGH, LOW);
     matrix.setTextWrap(false);
+
+    IntensityCheck.start();
+    
+    zoneInfo0.setText("   Starting Clock ...", _SCROLL_LEFT, _TO_FULL, InfoTick, I0s, I0e);
+    zoneInfo0.Animate(true);
+
+    if (!DFPlayer.begin(DFPSerial)) {  //Use softwareSerial to communicate with mp3.
+      PRINTX("MP3 Player failed", DFPlayer.readType());
+      zoneInfo0.setText("MP3 Player failed", _SCROLL_LEFT, _TO_LEFT, InfoTick1, I0s, I0e);
+      zoneInfo0.Animate(true);
+    } else {
+      DFPlayer.setTimeOut(500);
+      DFPlayer.volume(30);  
+      DFPlayer.EQ(DFPLAYER_EQ_BASS);
+      DFPlayer.outputDevice(DFPLAYER_DEVICE_SD);
+    }    
+
+    for (int wait = 10; wait >= 0; wait -=1) {
+      for ( int x = 0; x < matrix.width() - 1; x++ ) {
+        matrix.fillScreen(LOW);
+        matrix.drawLine(x, 0, matrix.width() - 1 - x, matrix.height() - 1, HIGH);
+        matrix.write(); // Send bitmap to display
+        delay(wait);
+      }
+    }
+
+    matrix.fillScreen(LOW);
+    matrix.write();
+
 
     //WiFi.mode(WIFI_OFF);
 
@@ -342,11 +409,6 @@ void setup()
     attachInterrupt(digitalPinToInterrupt(PIN_A), processEncoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_B), processEncoder, CHANGE);
     
-    // SetUp Sensors
-    Wire.begin(21,22, 400000);
-    //  ADDR=0 => 0x23 and ADDR=1 => 0x5C.
-    lightMeter.begin();
-  
     mySensor.settings.commInterface = I2C_MODE;
     mySensor.settings.I2CAddress = 0x76;
     mySensor.settings.tStandby = 0;
@@ -363,10 +425,9 @@ void setup()
     for (int i=0; i < NumberOfPoints; humiTable[i++]=0);
     for (int i=0; i < NumberOfPoints; presTable[i++]=0);
     
-    IntensityCheck.start();
-    matrix.setIntensity(IntensityMap(lightMeter.readLightLevel())); 
-    zoneInfo0.setText("Starting Clock ...", _SCROLL_LEFT, _TO_LEFT, 12, I0s, I0e);
-    zoneInfo0.Animate(true);
+    DFPlayer.playFolder(3, 101);
+
+    
     if (digitalRead(modePin)) {
       SetupWiFi();
       SyncNTPError = StartSyncNTP();
@@ -379,23 +440,29 @@ void setup()
           DSTFlag = false;
           timeClient.setTimeOffset(SECS_PER_HOUR*CET);
           adjustTime(+SECS_PER_HOUR*CET);
+          //adjustTime(+48*60);
         }    
+        // setTime(1512093784+60*56+40); // Friday, December 1, 2017 2:03:04 AM
         PRINTS("             Local Time="); PRINTS(timeClient.getFormattedTime() ); PRINTLN;
+#if DEBUG_ON            
+            digitalClockDisplay();
+#endif                    
         correctByDST();
-  //      PRINT("Now: ", now()); PRINTLN;
-  //      PRINT("Hour: ", hour()); PRINTLN;
-  //      PRINT("Min: ", minute()); PRINTLN;
-  //      PRINT("Sec: ", second()); PRINTLN;
-  //      PRINT("hour()%12): ", (hour()%12)); PRINTLN;
-  //      PRINT("11-(hour()%12): ", 11-(hour()%12)); PRINTLN;
-  //      PRINT("(11-(hour()%12))*3600: ", (11-hour()%12)*SECS_PER_HOUR); PRINTLN;
-  //      PRINT("(60-minute())*60: ", (60-minute())*60); PRINTLN;
-        // sync every 12 hours at 12:05 or 24:05 
-        //PRINT("Seconds to sync at 12:10: ", (11-(hour()%12))*SECS_PER_HOUR+(60-minute()+10)*SECS_PER_MIN+60-second() ); PRINTLN;
-        PRINT("   Mins to sync at 12:10: ", (11-(hour()%12))*60+60-minute()+10 - NTPRESYNC); PRINTLN;
-        PRINT("   Mins to sync:at     H: ", 60-minute()-CHIMEH ); PRINTLN;
-        PRINT("   Mins to sync:at   x15: ", 60-minute()- ( (int)(60-minute())/(int)15)*15 - CHIMEQ); PRINTLN;
-        NTPUpdateTask.start( (11-(hour()%12))*60+60-minute()+10 - NTPRESYNC);
+//        PRINT("Now: ", now()); PRINTLN;
+//        PRINT("Hour: ", hour()); PRINTLN;
+//        PRINT("Min: ", minute()); PRINTLN;
+//        PRINT("Sec: ", second()); PRINTLN;
+//        PRINT("hour()%12): ", (hour()%12)); PRINTLN;
+//        PRINT("11-(hour()%12): ", 11-(hour()%12)); PRINTLN;
+//        PRINT("(11-(hour()%12))*3600: ", (11-hour()%12)*SECS_PER_HOUR); PRINTLN;
+//        PRINT("(60-minute())*60: ", (60-minute())*60); PRINTLN;
+//        // sync every 12 hours at 12:05 or 24:05 
+//        PRINT("Seconds to sync at 12:10: ", ((12-(hour()%12))*60 - minute())*60-second()+10*60 -NTPRESYNC); PRINTLN;
+//        //PRINT("   Mins to sync at 12:10: ", (11-(hour()%12))*60+60-minute()+10 - NTPRESYNC); PRINTLN;
+//        PRINT("   Secs to sync:at     H: ", (60-minute())*60-second() - 60*60); PRINTLN;
+//        PRINT("   Secs to sync:at   x15: ", ((60-minute() -((int)(60-minute())/(int)15)*15))*60-second()-15*60); PRINTLN;
+        
+        NTPUpdateTask.start( ((12-(hour()%12))*60 - minute())*60-second()+10*60 -NTPRESYNC );
         
         zoneInfo0.setText("Sync OK", _SCROLL_LEFT, _TO_LEFT, InfoTick1, I0s, I0e);
         zoneInfo0.Animate(true);
@@ -414,16 +481,18 @@ void setup()
     SecondsVA.start();
     ScreenSaver.start();
 
-    ChimeQuarter.start( 60-minute()- ( (int)(60-minute())/(int)15)*15 - CHIMEQ );
-    ChimeHour.start( 60-minute()-CHIMEH );   
+    ChimeQuarter.start( ((60-minute() -((int)(60-minute())/(int)15)*15))*60-second()-15*60 );
+    ChimeHour.start( (60-minute())*60-second() - 60*60 );   
     
     
     matrix.setClip(0, matrix.width(), 0, matrix.height());
     matrix.fillScreen(LOW);
     matrix.write();    
-    
+
+    goBackState = _Clock_complete_info;
     ClockState = _Clock_complete_info_init;
     //ClockState = _Clock_simple_time_init;
+
 }
 
 void loop()
@@ -488,6 +557,9 @@ void loop()
     static byte VAValue;
 
     static bool screenSaverNotActive = true;
+    static String ParamS = DingOnOff? "On":"Off";
+
+    
   
   if (SensorUpdate.check(MeasurementFreg)) {
 
@@ -573,28 +645,30 @@ void loop()
 
   // check time dependant actions
 
-
-  if (ChimeQuarter.check(CHIMEQ)) {
-   int fileNumber = minute() / 15;
-   PRINT("Minute", minute()); PRINTLN;
-   PRINT("Play file number", fileNumber); PRINTLN;
-   ChimeWait.start();
-  }
-  if (ChimeWait.check(CHIMEW)) {
-    if (ChimeHour.check(CHIMEH)) {
-      int fileNumber = hour();
-      PRINT("Hour", hour()); PRINTLN;
-      PRINT("Play file number", fileNumber); PRINTLN;
+  { int hourTemp = hour();
+    if (ChimeQuarter.check(CHIMEQ)) {
+     int fileNumber = minute() / 15;
+     PRINT("Minute", minute()); 
+     PRINT(" Play Qurter file number", fileNumber); PRINTLN;
+     if (DingOnOff && hourTemp >= DingON && hourTemp < DingOFF ) DFPlayer.playFolder(2, fileNumber);
+     ChimeWait.start();
+    }
+    if (ChimeWait.check(CHIMEW)) {
+      if (ChimeHour.check(CHIMEH)) {
+        int fileNumber = hour() % 12;
+        PRINT("Hour", hour()); 
+        PRINT(" Play hour file number", fileNumber); PRINTLN;
+        if (DingOnOff && hourTemp >= DingON && hourTemp < DingOFF ) DFPlayer.playFolder(1, fileNumber);
+      }
     }
   }
-
 
   // cehck the current clock / display status
   switch(ClockState)
   {
-      case _Clock_init:
-          ClockState = _Clock_simple_time_init;
-          break;
+//      case _Clock_init:
+//          ClockState = _Clock_simple_time_init;
+//          break;
           
       case _Clock_NTP_Sync:
         PRINTT;
@@ -686,7 +760,7 @@ void loop()
             }
             updateDisplay = true;
           }
-          if (keyboard(_Clock_complete_info_init, _Clock_simple_time_init, _Clock_none, _Clock_none) == SW_UP) {
+          if (keyboard(_Clock_menu_init, _Clock_simple_time_init, _Clock_none, _Clock_none) == SW_UP) { 
             DataMode = (DataMode+1)%3;
             StatTask.check(-DiagramDelay);
           }
@@ -738,8 +812,9 @@ void loop()
 //            flasher = !flasher;
 //            digitalWrite(ledPin, flasher);
             updateDisplay = true;
-            PRINTS(timeClient.getFormattedTime() );
-            PRINTLN;
+#if DEBUG_ON            
+            digitalClockDisplay();
+#endif            
 //            matrix.setClip(H0e+1,H0e+2,0,8);
 //            matrix.drawPixel(H0e+1,2,flasher);
 //            matrix.drawPixel(H0e+1,5,flasher);
@@ -826,26 +901,30 @@ void loop()
               }
           }
 
-          key = keyboard(_Clock_complete_info_init, _Clock_alarm_init, _Clock_none, _Clock_none);
+          key = keyboard(_Clock_Temp_init, _Clock_complete_info_init, _Clock_none, _Clock_none);
           break;     
 
-      case _Clock_alarm_init:
-          zoneInfo0.setText("Set Up Alarm", _SCROLL_LEFT, _TO_LEFT, 5, I0s, I0e);
+      case _Clock_menu_init:
+          clearScreen();
+          zoneInfo0.setText("Menu:", _SCROLL_RIGHT, _TO_LEFT, InfoTick, I0s, I0e);
           zoneInfo0.Animate(true);
-          
           updateDisplay = false;
-
-          // adjustTime(-SECS_PER_HOUR*2);
-          // PRINTS("Alarm Init closed\n");
-          // Status2Clock_NTP_Sync();
-          ClockState = _Clock_Temp_init;
+          goBackState = _Clock_menu_init;
+          ClockState = _Clock_menu;
+          DataMode = 0;
+          zoneInfo0.setText("Ding:", _PRINT, _NONE_MOD, InfoTick, MEs, MEe);
+          zoneInfo1.setText(ParamS, _BLINK, _NONE_MOD, InfoSlow, PAs, PAe);
           break;
           
-      case _Clock_alarm:
-          //PRINTS("Alarm\n");
-          updateDisplay = zoneInfo0.Animate(false);
-          if (zoneInfo0.AnimateDone()) zoneInfo0.Reset();
-          key = keyboard(_Clock_complete_info_init, _Clock_simple_time_init, _Clock_none, _Clock_none);
+      case _Clock_menu:
+          updateDisplay = zoneInfo1.Animate(false);
+          if (keyboard(_Clock_complete_info_init, _Clock_Temp_init, _Clock_none, _Clock_none) == SW_UP) {
+            DingOnOff = !(DingOnOff);
+            ParamS = DingOnOff? "On":"Off";
+            zoneInfo1.setText(ParamS, _BLINK, _NONE_MOD, InfoSlow, PAs, PAe);
+            savePreferences();
+            updateDisplay = true;
+          }
           break;     
       
       case _Clock_complete_info_init:
@@ -889,8 +968,9 @@ void loop()
             flasher = !flasher;
             // digitalWrite(ledPin, flasher);
             updateDisplay = true;
-//            PRINTS(timeClient.getFormattedTime() );
-//            PRINTLN;
+#if DEBUG_ON            
+            // digitalClockDisplay();
+#endif            
             matrix.setClip(H0e+1,H0e+2,0,8);
             matrix.drawPixel(H0e+1,2,flasher);
             matrix.drawPixel(H0e+1,5,flasher);
@@ -953,14 +1033,14 @@ void loop()
             DataMode = (DataMode+1) % 5;
           }
           updateDisplay |= zoneInfo1.Animate(false);
-          if (keyboard(_Clock_simple_time_init, _Clock_alarm_init, _Clock_none, _Clock_none) == SW_UP) {
+          if (keyboard(_Clock_simple_time_init, _Clock_menu_init, _Clock_none, _Clock_none) == SW_UP) {
             DataMode = (DataMode+1) % 5;
             DataDisplayTask.start(-FullInfoDelay);
           }
           break;          
           
-      case _Clock_idle:
-          break;
+//      case _Clock_idle:
+//          break;
 
       default:;
   }
