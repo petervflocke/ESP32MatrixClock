@@ -7,7 +7,6 @@
 #define PRINTX(s, v) { Serial.print(s); Serial.print(v, HEX); }  
 #define PRINTS(s) Serial.print(s)   
 #define PRINTLN Serial.println()
-#define PRINTT digitalClockDisplay()
 #else
 #define PRINT(s, v)   
 #define PRINTX(s, v)  
@@ -119,6 +118,25 @@ typedef float pres_t;
 #define CHIMEQ 900
 #define DingON   9
 #define DingOFF 23
+// define freq. to update MQTT/IOT page in seconds
+#define Time2UpdateMQTT 60
+
+// IOT defines
+
+#define feedTemp "/feeds/temperature"
+#define feedHumi "/feeds/humidity"
+#define feedPres "/feeds/pressure"
+#define feedBrig "/feeds/brightness"
+#define feedData "/feeds/data"
+#define feedLED  "/feeds/led"
+
+#define AIO_SERVER      "io.adafruit.com"
+#define AIO_SERVERPORT  8883                   // use 8883 for SSL -1883
+
+//#define AIO_USERNAME    this is defined in non-public file, define here for you
+//#define AIO_KEY         this is defined in non-public file, define here for you
+#include "credentials.h"
+
 
 
 enum ClockStates

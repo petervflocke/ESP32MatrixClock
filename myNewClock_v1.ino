@@ -8,7 +8,12 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <WiFi.h>
+//#include <WiFi.h>
+#include <WiFiClientSecure.h>
+
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
+
 #include <WiFiManager.h>   
 #include <WiFiUdp.h>
 #include <NTPClient.h>
@@ -69,11 +74,33 @@ Schedular ScreenSaver(_Seconds);      // LED Matrix standby time after last PIR 
 Schedular ChimeQuarter(_Seconds);     // time for qurterly chime
 Schedular ChimeHour(_Seconds);        // time for hourly chime
 Schedular ChimeWait(_Millis);         // time to wait after 4 quarter chime
+Schedular UpdateMQTT(_Seconds);       // Frequency of updating IOT
 
 
 // MP3 Player
 HardwareSerial DFPSerial(1);
 DFRobotDFPlayerMini DFPlayer;
+
+
+// IOT variables
+WiFiClientSecure client;
+// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
+// Feeds
+
+// Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
+Adafruit_MQTT_Publish tempMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedTemp);
+Adafruit_MQTT_Publish humiMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedHumi);
+Adafruit_MQTT_Publish presMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedPres);
+Adafruit_MQTT_Publish brigMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedBrig);
+Adafruit_MQTT_Publish dataMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedData);
+
+// Setup a feed for subscribing to changes.
+Adafruit_MQTT_Subscribe ledMQTT = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME feedLED);
+
+// Bug workaround for Arduino 1.6.6, it seems to need a function declaration
+// for some reason (only affects ESP8266, likely an arduino-builder bug).
+void MQTT_connect();
 
 
 // Parameter section, just one for the time being
@@ -444,9 +471,9 @@ void setup()
         }    
         // setTime(1512093784+60*56+40); // Friday, December 1, 2017 2:03:04 AM
         PRINTS("             Local Time="); PRINTS(timeClient.getFormattedTime() ); PRINTLN;
-#if DEBUG_ON            
-            digitalClockDisplay();
-#endif                    
+
+        PRINTS(digitalClockString());
+
         correctByDST();
 //        PRINT("Now: ", now()); PRINTLN;
 //        PRINT("Hour: ", hour()); PRINTLN;
@@ -477,6 +504,9 @@ void setup()
       zoneInfo0.setText("WiFi Off", _SCROLL_LEFT, _TO_LEFT, InfoTick1, I0s, I0e);
       zoneInfo0.Animate(true);
     }
+
+    mqtt.subscribe(&ledMQTT);
+    UpdateMQTT.start(-Time2UpdateMQTT);
 
     SecondsVA.start();
     ScreenSaver.start();
@@ -557,10 +587,11 @@ void loop()
     static byte VAValue;
 
     static bool screenSaverNotActive = true;
+    static String lastTime = "";
+    
     static String ParamS = DingOnOff? "On":"Off";
 
-    
-  
+
   if (SensorUpdate.check(MeasurementFreg)) {
 
     averageTemp = tempTable[dayNumber] + (mySensor.readTempC()-tempTable[dayNumber])/measurementNumber;
@@ -594,6 +625,18 @@ void loop()
     }
   }
 
+
+  if (UpdateMQTT.check(Time2UpdateMQTT)) {
+      PRINTS("MQTT publishing\n");
+      MQTT_connect();
+      tempMQTT.publish( mySensor.readTempC() );
+      humiMQTT.publish( mySensor.readFloatHumidity() );
+      presMQTT.publish( mySensor.readFloatPressure()/100 );
+      brigMQTT.publish( lightMeter.readLightLevel() );
+      dataMQTT.publish( lastTime.c_str() );
+  }
+
+
   if (second()==59) {
     if (SecondsVA.check(VADelay)) {
       VAValue -= VADec;
@@ -623,6 +666,7 @@ void loop()
       digitalWrite(ledPin, LOW);
       matrix.shutdown(false);
       screenSaverNotActive = true;
+      lastTime = digitalClockString();
     } else {
       if (ScreenSaver.check(ScreenTimeOut)) {
         digitalWrite(ledPin, HIGH);
@@ -671,7 +715,7 @@ void loop()
 //          break;
           
       case _Clock_NTP_Sync:
-        PRINTT;
+        PRINTS(digitalClockString());
         if (StartSyncNTP()) { // error by NTP sync
           zoneInfo0.setText("NTP Sync ERROR", _SCROLL_LEFT, _TO_FULL, InfoTick1, I0s, I0e);
           zoneInfo0.Animate(true);
@@ -684,7 +728,7 @@ void loop()
         }
         ClockState = goBackState;
         PRINT("NTP Resync Completed\nNew mode=", ClockState); PRINTLN;
-        PRINTT;
+        PRINTS(digitalClockString());
         break;
 
       case _Clock_Temp_init:
@@ -812,9 +856,9 @@ void loop()
 //            flasher = !flasher;
 //            digitalWrite(ledPin, flasher);
             updateDisplay = true;
-#if DEBUG_ON            
-            digitalClockDisplay();
-#endif            
+
+            PRINTS(digitalClockString());
+
 //            matrix.setClip(H0e+1,H0e+2,0,8);
 //            matrix.drawPixel(H0e+1,2,flasher);
 //            matrix.drawPixel(H0e+1,5,flasher);
@@ -1077,38 +1121,47 @@ void processButton() {
    }
 }
 
-void processEncoder () 
-{
+void processEncoder () {
   uint8_t x = R.read();
-  if (x)   {
+  if (x) {
     PRINTS((x == DIR_CW ? "\n+1\n" : "\n-1\n"));
     Q.push(&x);
   }
 }
 
+// Function to connect and reconnect as necessary to the MQTT server.
+// Should be called in the loop function and it will take care if connecting.
+void MQTT_connect() {
+  int8_t ret;
 
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
 
-#if DEBUG_ON
-void digitalClockDisplay(){
+  Serial.print("Connecting to MQTT... ");
+
+  uint8_t retries = 3;
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.println(mqtt.connectErrorString(ret));
+       Serial.println("Retrying MQTT connection in 5 seconds...");
+       mqtt.disconnect();
+       delay(5000);  // wait 5 seconds
+       retries--;
+       if (retries == 0) {
+         // basically die and wait for WDT to reset me
+         while (1);
+       }
+  }
+  Serial.println("MQTT Connected!");
+}
+
+String digitalClockString() {
   // digital clock display of the time
-  Serial.println();
-  Serial.print(hour());
-  printDigits(minute());
-  printDigits(second());
-  Serial.print(" ");
-  Serial.print(day());
-  Serial.print(" ");
-  Serial.print(month());
-  Serial.print(" ");
-  Serial.print(year()); 
-  Serial.println(); 
+  return String(hour())+printDigits(minute())+printDigits(second())+" "+String(day())+"."+String(month())+"."+String(year())+"\n";
 }
 
-void printDigits(int digits){
+String printDigits(int digits) {
   // utility function for digital clock display: prints preceding colon and leading 0
-  Serial.print(":");
-  if(digits < 10)
-    Serial.print('0');
-  Serial.print(digits);
+  return String(":" + (digits < 10 ? String("0") : String("")) + String(digits));
 }
-#endif
