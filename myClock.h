@@ -133,10 +133,12 @@ typedef float pres_t;
 #define AIO_SERVER      "io.adafruit.com"
 #define AIO_SERVERPORT  8883                   // use 8883 for SSL -1883
 
-//#define AIO_USERNAME    this is defined in non-public file, define here for you
-//#define AIO_KEY         this is defined in non-public file, define here for you
-#include "credentials.h"
+//#define AIO_USERNAME    this is defined in non-public credentials.h file, define here for you
+//#define AIO_KEY         this is defined in non-public credentials.h file, define here for you
 
+#if not AIO_USERNAME
+#include "credentials.h"  
+#endif 
 
 
 enum ClockStates
