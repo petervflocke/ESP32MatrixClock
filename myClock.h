@@ -1,6 +1,6 @@
 // Turn on debug statements to the serial output
 
-#define  DEBUG_ON 1
+#define  DEBUG_ON 0
 
 #if  DEBUG_ON
 #define PRINT(s, v) { Serial.print(s); Serial.print(v); }    
@@ -119,7 +119,7 @@ typedef float pres_t;
 #define DingON   9
 #define DingOFF 23
 // define freq. to update MQTT/IOT page in seconds
-#define Time2UpdateMQTT 60
+#define Time2UpdateMQTT 60000
 
 // IOT defines
 
@@ -128,6 +128,7 @@ typedef float pres_t;
 #define feedPres "/feeds/pressure"
 #define feedBrig "/feeds/brightness"
 #define feedData "/feeds/data"
+#define feedOnOf "/feeds/onoff"
 #define feedLED  "/feeds/led"
 
 #define AIO_SERVER      "io.adafruit.com"

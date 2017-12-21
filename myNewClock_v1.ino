@@ -17,7 +17,7 @@
 #include <WiFiManager.h>   
 #include <WiFiUdp.h>
 #include <NTPClient.h>
-#include <MD_CirQueue.h>
+//#include <MD_CirQueue.h> // switch to xQueueHandle 
 #include <MD_REncoder.h>
 #include <BH1750.h>
 #include <SparkFunBME280.h>
@@ -48,7 +48,8 @@ temp_t humiTable[NumberOfPoints];
 temp_t presTable[NumberOfPoints];
 
 //const uint8_t  QUEUE_SIZE = 15;
-MD_CirQueue Q(QUEUE_SIZE, sizeof(uint8_t));
+//MD_CirQueue Q(QUEUE_SIZE, sizeof(uint8_t)); // switch to xQueueHandle :
+xQueueHandle xQueue;
 
 // set up encoder object
 MD_REncoder R = MD_REncoder(PIN_A, PIN_B);
@@ -93,6 +94,7 @@ Adafruit_MQTT_Publish tempMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedT
 Adafruit_MQTT_Publish humiMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedHumi);
 Adafruit_MQTT_Publish presMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedPres);
 Adafruit_MQTT_Publish brigMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedBrig);
+Adafruit_MQTT_Publish onofMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedOnOf);
 Adafruit_MQTT_Publish dataMQTT = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME feedData);
 
 // Setup a feed for subscribing to changes.
@@ -100,7 +102,12 @@ Adafruit_MQTT_Subscribe ledMQTT = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME fe
 
 // Bug workaround for Arduino 1.6.6, it seems to need a function declaration
 // for some reason (only affects ESP8266, likely an arduino-builder bug).
-void MQTT_connect();
+boolean MQTT_connect();
+
+
+//globals for screensaver status main loop and MQTT updates
+bool screenSaverNotActive = true;
+String lastTime = "";
 
 
 // Parameter section, just one for the time being
@@ -292,30 +299,34 @@ boolean checkTime(uint8_t hh, uint8_t mm, uint8_t ss, boolean exact) {
 
 uint8_t keyboard(ClockStates key_DIR_CW, ClockStates key_DIR_CCW, ClockStates key_SW_DOWN, ClockStates key_SW_UP) {
   uint8_t  key=DIR_NONE;
-  noInterrupts();
-  if (!Q.isEmpty()) {
-    Q.pop(&key);
-  }
-  interrupts();
 
-  switch(key) {
-    case DIR_CW:
-      if (key_DIR_CW != _Clock_none) ClockState = key_DIR_CW;
-      break;
-    case DIR_CCW:
-      if (key_DIR_CCW != _Clock_none) ClockState = key_DIR_CCW;
-      break;
-    case SW_DOWN:
-      if (key_SW_DOWN != _Clock_none) ClockState = key_SW_DOWN;
-      break;
-    case SW_UP:
-      if (key_SW_UP != _Clock_none) ClockState = key_SW_UP;
-      break;
-  }
-  #if DEBUG_ON
-    if (key != DIR_NONE) {PRINT("New Closk State: ", ClockState); PRINTLN;}
-  #endif
-  return key;  
+//  noInterrupts();
+//  if (!Q.isEmpty()) {
+//    Q.pop(&key);
+//  }
+//  interrupts();
+
+
+  if ( xQueueReceive( xQueue, &key, 0 ) == pdPASS ) {
+    switch(key) {
+      case DIR_CW:
+        if (key_DIR_CW != _Clock_none) ClockState = key_DIR_CW;
+        break;
+      case DIR_CCW:
+        if (key_DIR_CCW != _Clock_none) ClockState = key_DIR_CCW;
+        break;
+      case SW_DOWN:
+        if (key_SW_DOWN != _Clock_none) ClockState = key_SW_DOWN;
+        break;
+      case SW_UP:
+        if (key_SW_UP != _Clock_none) ClockState = key_SW_UP;
+        break;
+    }
+    #if DEBUG_ON
+      if (key != DIR_NONE) {PRINT("New Closk State: ", ClockState); PRINTLN;}
+    #endif
+    return key;
+  } else return DIR_NONE;
 }
 
 /* Snake Routines 
@@ -427,7 +438,8 @@ void setup()
 
     //WiFi.mode(WIFI_OFF);
 
-    Q.begin(); // start queue to collect button and rotery events
+    // Q.begin(); // start queue to collect button and rotery events
+    xQueue = xQueueCreate(QUEUE_SIZE, sizeof(uint8_t));
 
     pinMode(PIN_BUT, INPUT_PULLUP); // button to operate menu
     attachInterrupt(digitalPinToInterrupt(PIN_BUT), processButton, CHANGE);
@@ -505,8 +517,8 @@ void setup()
       zoneInfo0.Animate(true);
     }
 
-    mqtt.subscribe(&ledMQTT);
-    UpdateMQTT.start(-Time2UpdateMQTT);
+    //mqtt.subscribe(&ledMQTT);
+    // UpdateMQTT.start(-Time2UpdateMQTT);
 
     SecondsVA.start();
     ScreenSaver.start();
@@ -522,6 +534,14 @@ void setup()
     goBackState = _Clock_complete_info;
     ClockState = _Clock_complete_info_init;
     //ClockState = _Clock_simple_time_init;
+
+    xTaskCreate(
+    taskMQTT,           /* start regular  MQTT update task*/
+    "taskMQTT",         /* name of task. */
+    8000,               /* Stack size of task */
+    NULL,               /* parameter of the task */
+    1,                  /* priority of the task */
+    NULL);                    /* Task handle to keep track of created task */
 
 }
 
@@ -585,10 +605,7 @@ void loop()
     boolean continueLoop = true;
 
     static byte VAValue;
-
-    static bool screenSaverNotActive = true;
-    static String lastTime = "";
-    
+  
     static String ParamS = DingOnOff? "On":"Off";
 
 
@@ -624,18 +641,6 @@ void loop()
       }
     }
   }
-
-
-  if (UpdateMQTT.check(Time2UpdateMQTT)) {
-      PRINTS("MQTT publishing\n");
-      MQTT_connect();
-      tempMQTT.publish( mySensor.readTempC() );
-      humiMQTT.publish( mySensor.readFloatHumidity() );
-      presMQTT.publish( mySensor.readFloatPressure()/100 );
-      brigMQTT.publish( lightMeter.readLightLevel() );
-      dataMQTT.publish( lastTime.c_str() );
-  }
-
 
   if (second()==59) {
     if (SecondsVA.check(VADelay)) {
@@ -1108,14 +1113,16 @@ void processButton() {
       if (SWPrev == 1) {
         SWPrev = 0;
         x = SW_DOWN;
-        Q.push((uint8_t *)&x);
+        //Q.push((uint8_t *)&x);
+        xQueueSendToBackFromISR( xQueue, (uint8_t *)&x, NULL );
         PRINTS("\nDown\n");
       } 
    } else { 
       if (SWPrev == 0) {
         SWPrev = 1;
         x = SW_UP;
-        Q.push((uint8_t *)&x);
+        //Q.push((uint8_t *)&x);
+        xQueueSendToBackFromISR( xQueue, (uint8_t *)&x, NULL );
         PRINTS("\nUp\n");
       } 
    }
@@ -1125,35 +1132,66 @@ void processEncoder () {
   uint8_t x = R.read();
   if (x) {
     PRINTS((x == DIR_CW ? "\n+1\n" : "\n-1\n"));
-    Q.push(&x);
+    //Q.push(&x);
+    xQueueSendToBackFromISR( xQueue, (uint8_t *)&x, NULL );
+  }
+}
+
+
+void taskMQTT( void * parameter ) {
+
+  const TickType_t xTicksToWait = pdMS_TO_TICKS(Time2UpdateMQTT);
+
+  UBaseType_t uxHighWaterMark;
+
+  while (true) {
+    uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+    // Serial.print("\nStack IN:"); Serial.println(uxHighWaterMark);
+    vTaskDelay( xTicksToWait );
+    PRINTS("MQTT publishing\n");
+    if ( MQTT_connect() ) {
+      tempMQTT.publish( mySensor.readTempC() );
+      humiMQTT.publish( mySensor.readFloatHumidity() );
+      presMQTT.publish( mySensor.readFloatPressure()/100 );
+      brigMQTT.publish( lightMeter.readLightLevel() );
+      dataMQTT.publish( lastTime.c_str() );
+      onofMQTT.publish( screenSaverNotActive?1:0 );
+    }
+    uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+    // Serial.print("\nStack OUT:"); Serial.println(uxHighWaterMark);
   }
 }
 
 // Function to connect and reconnect as necessary to the MQTT server.
 // Should be called in the loop function and it will take care if connecting.
-void MQTT_connect() {
+boolean MQTT_connect() {
   int8_t ret;
 
   // Stop if already connected.
   if (mqtt.connected()) {
-    return;
+    return true;
   }
 
-  Serial.print("Connecting to MQTT... ");
-
+  if (!WiFi.isConnected()) {
+    PRINTS("Connecting to WIFI... ");
+    WiFi.begin();
+    delay(1000);
+  }
+  
+  PRINTS("Connecting to MQTT... ");
   uint8_t retries = 3;
-  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
-       Serial.println(mqtt.connectErrorString(ret));
-       Serial.println("Retrying MQTT connection in 5 seconds...");
+  while ( (ret = mqtt.connect()) != 0 && (retries > 0) ) { // connect will return 0 for connected
+       PRINTS(mqtt.connectErrorString(ret));PRINTLN;
+       PRINTS("Retrying MQTT connection in 5 seconds...\n");
        mqtt.disconnect();
        delay(5000);  // wait 5 seconds
        retries--;
-       if (retries == 0) {
-         // basically die and wait for WDT to reset me
-         while (1);
-       }
   }
-  Serial.println("MQTT Connected!");
+  if (ret == 0) {
+    PRINTS("MQTT Connected!\n");
+    return true;
+  }
+  else return false;
 }
 
 String digitalClockString() {
